@@ -644,7 +644,7 @@ def main():
         logger.info("=" * 80)
         
         successful, failed = traverse_and_process_depth_first(
-            RCLONE_REMOTE, auth_data, temp_dir,
+            CURRENT_SERVER, auth_data, temp_dir,
             MIN_FILE_SIZE, MAX_FILE_SIZE, SUPPORTED_EXTENSIONS,
             state
         )
