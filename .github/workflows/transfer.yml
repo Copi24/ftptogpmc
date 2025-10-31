@@ -18,6 +18,20 @@ jobs:
     timeout-minutes: 360  # 6 hours max
     
     steps:
+      - name: Free up disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+          echo "Removing unnecessary tools and Docker images..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo docker builder prune -a --force
+          echo "Disk space after cleanup:"
+          df -h
+      
       - name: Checkout repository
         uses: actions/checkout@v4
       
