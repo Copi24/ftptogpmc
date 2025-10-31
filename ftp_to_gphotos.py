@@ -226,15 +226,17 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             str(local_path.parent),
             '--progress',
             '--no-check-dest',
-            '--buffer-size', '32M',
+            '--buffer-size', '16M',  # Smaller buffer for unstable connections
             '--transfers', '1',
             '--checkers', '1',
-            '--low-level-retries', '3',
-            '--retries', '3',
+            '--low-level-retries', '10',  # More retries
+            '--retries', '10',  # More retries
             '--stats', '30s',
             '--log-level', 'INFO',
-            '--timeout', '300s',
-            '--contimeout', '60s'
+            '--timeout', '600s',  # 10 minute timeout
+            '--contimeout', '120s',  # 2 minute connection timeout
+            '--tpslimit', '10',  # Limit to 10 transactions per second
+            '--tpslimit-burst', '0'  # No burst
         ]
         
         logger.info(f"Starting download: {' '.join(cmd)}")
@@ -364,11 +366,26 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
     logger.info(f"Local path: {local_path}")
     logger.info("=" * 80)
     
-    # Stream file from FTP
-    download_success = stream_file_from_ftp(remote, remote_path, local_path)
+    # Try download with retries
+    max_download_attempts = 2
+    download_success = False
+    
+    for attempt in range(1, max_download_attempts + 1):
+        if attempt > 1:
+            logger.info(f"Download attempt {attempt}/{max_download_attempts} for {file_name}")
+            time.sleep(30)  # Wait before retry
+        
+        download_success = stream_file_from_ftp(remote, remote_path, local_path)
+        
+        if download_success:
+            break
+        else:
+            logger.warning(f"Download attempt {attempt} failed")
+            if attempt < max_download_attempts:
+                logger.info("Will retry...")
     
     if not download_success:
-        logger.error(f"Failed to download {remote_path}")
+        logger.error(f"Failed to download {remote_path} after {max_download_attempts} attempts - SKIPPING")
         return False
     
     # Verify file exists - rclone preserves original filename
