@@ -21,15 +21,43 @@ jobs:
       - name: Maximize build disk space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 2048        # Keep 2GB for system
-          swap-size-mb: 1024           # 1GB swap
+          root-reserve-mb: 1536        # Reduce to 1.5GB for system (frees ~500MB)
+          swap-size-mb: 512            # Reduce swap to 512MB (frees ~500MB)
           remove-dotnet: 'true'        # Remove .NET (~10GB)
           remove-android: 'true'       # Remove Android SDK (~8GB)
           remove-haskell: 'true'       # Remove Haskell (~5GB)
           remove-codeql: 'true'        # Remove CodeQL (~2GB)
           remove-docker-images: 'true' # Remove Docker images (~5GB)
-          temp-reserve-mb: 100         # Keep minimal on temp disk
+          temp-reserve-mb: 50          # Reduce temp reserve to 50MB (frees ~50MB)
           build-mount-path: '/workspace'
+      
+      - name: Additional aggressive cleanup
+        run: |
+          # Remove large unused packages and caches
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+          
+          # Remove pip cache
+          rm -rf ~/.cache/pip
+          
+          # Remove Python bytecode caches
+          find /usr -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+          
+          # Remove old logs
+          sudo journalctl --vacuum-time=1d
+          
+          # Remove snap packages if any (can free several GB)
+          if command -v snap &> /dev/null; then
+            sudo snap list | grep -v "^Name" | awk '{print $1}' | xargs -r sudo snap remove 2>/dev/null || true
+            sudo rm -rf /var/lib/snapd
+          fi
+          
+          # Remove large unused tools
+          sudo rm -rf /usr/local/lib/android 2>/dev/null || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          
+          # Show freed space
+          df -h /
       
       - name: Checkout repository
         uses: actions/checkout@v4
