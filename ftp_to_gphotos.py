@@ -607,17 +607,47 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
         
         if mkv_path and mkv_path.exists():
             logger.info(f"✅ Conversion complete: {mkv_path.name}")
-            # Delete ISO file to save space
+            
+            # Delete ISO file to free space (CRITICAL!)
             try:
+                iso_size = local_path.stat().st_size / (1024**3)
                 local_path.unlink()
-                logger.info(f"🗑️ Deleted ISO file to free space")
-            except:
-                pass
+                logger.info(f"🗑️ Deleted ISO file ({iso_size:.2f}GB) to free space")
+            except Exception as e:
+                logger.error(f"❌ Failed to delete ISO file: {e}")
+            
+            # Verify cleanup of mount/extract directories (CRITICAL for disk space!)
+            # Check for any leftover mount/extract directories from this ISO
+            iso_stem = local_path.stem
+            mount_dir = local_path.parent / f"{iso_stem}_mount"
+            extract_dir = local_path.parent / f"{iso_stem}_extracted"
+            
+            if mount_dir.exists():
+                logger.warning(f"⚠️ Mount directory still exists: {mount_dir}")
+                try:
+                    from iso_converter import cleanup_mount_or_extract
+                    cleanup_mount_or_extract(mount_dir)
+                except Exception as e:
+                    logger.error(f"❌ Failed to cleanup mount directory: {e}")
+            
+            if extract_dir.exists():
+                logger.warning(f"⚠️ Extract directory still exists: {extract_dir}")
+                try:
+                    from iso_converter import cleanup_mount_or_extract
+                    cleanup_mount_or_extract(extract_dir)
+                except Exception as e:
+                    logger.error(f"❌ Failed to cleanup extract directory: {e}")
+            
             # Use MKV file for upload
             local_path = mkv_path
             file_info['size'] = mkv_path.stat().st_size
             file_info['size_gb'] = file_info['size'] / (1024**3)
             logger.info(f"📊 New file size: {file_info['size_gb']:.2f}GB")
+            
+            # Verify disk space was freed
+            stat = shutil.disk_usage(temp_dir)
+            free_space_gb = stat.free / (1024**3)
+            logger.info(f"💾 Disk space after cleanup: {free_space_gb:.2f}GB available")
         else:
             logger.error("❌ Failed to convert ISO to MKV")
             download_success = False
