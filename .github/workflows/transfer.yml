@@ -63,7 +63,7 @@ jobs:
       
       - name: Test rclone connection
         run: |
-          rclone lsd 3DFF: || echo "Warning: Could not list directories"
+          rclone lsd Challenger: || echo "Warning: Could not list directories"
       
       - name: Install Python dependencies
         run: |
