@@ -487,17 +487,17 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     logger.info(f"✓ Disk space check: {free_space_gb:.1f}GB available, {required_space_gb:.1f}GB needed")
     
     # Try download with aggressive retries (don't give up easily!)
-    max_download_attempts = 5  # More attempts
+    max_download_attempts = 3  # Reduced - FTP is very unstable
     download_success = False
     
     for attempt in range(1, max_download_attempts + 1):
         if attempt > 1:
-            wait_time = 30 * attempt  # Increasing wait: 30s, 60s, 90s, 120s
-            logger.info(f"🔄 Download attempt {attempt}/{max_download_attempts} for {file_name}")
-            logger.info(f"⏳ Waiting {wait_time}s before retry to let FTP server recover...")
+            wait_time = 30 * (attempt - 1)  # 0s, 30s, 60s
+            logger.info(f"⏳ Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
         
-        download_success = stream_file_from_ftp(remote, remote_path, local_path)
+        logger.info(f"🔄 Download attempt {attempt}/{max_download_attempts} for {file_name}")
+        download_success = stream_file_from_ftp(remote, remote_path, local_path, attempt=attempt)
         
         if download_success:
             logger.info(f"✅ Download successful on attempt {attempt}!")
@@ -505,18 +505,11 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
         else:
             logger.warning(f"❌ Download attempt {attempt}/{max_download_attempts} failed")
             
-            # Clean up partial download if exists
-            if local_path.exists():
-                try:
-                    local_path.unlink()
-                    logger.info(f"🗑️ Cleaned up partial download")
-                except:
-                    pass
-            
             if attempt < max_download_attempts:
                 logger.info(f"💪 Will retry (attempt {attempt + 1}/{max_download_attempts})...")
             else:
                 logger.error(f"💔 All {max_download_attempts} download attempts exhausted")
+                logger.error(f"📝 File marked as FAILED - will retry on next workflow run")
     
     if not download_success:
         error_msg = f"Failed to download after {max_download_attempts} attempts"
