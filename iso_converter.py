@@ -153,9 +153,6 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         last_progress_line = None
         start_time = time.time()
         
-        import threading
-        import queue
-        
         # Queue for collecting output
         output_queue = queue.Queue()
         error_queue = queue.Queue()
