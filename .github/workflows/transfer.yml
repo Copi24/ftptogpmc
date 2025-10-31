@@ -43,15 +43,22 @@ jobs:
         with:
           name: upload-state
           path: repo/
+        env:
+          ACTIONS_ALLOW_UNSUPPORTED_RUNTIME: true
       
       - name: Check state file
         run: |
           if [ -f "repo/upload_state.json" ]; then
             echo "✅ State file found"
             echo "State file size: $(wc -c < repo/upload_state.json) bytes"
-            echo "Completed files: $(jq '.completed | length' repo/upload_state.json 2>/dev/null || echo 0)"
+            if command -v jq >/dev/null 2>&1; then
+              echo "Completed files: $(jq '.completed | length' repo/upload_state.json 2>/dev/null || echo 0)"
+            else
+              echo "Completed files: (jq not installed, cannot count)"
+            fi
           else
-            echo "⚠️ State file NOT found - will create new state"
+            echo "⚠️ State file NOT found (this is normal on first run)"
+            echo "⚠️ A new state file will be created after the first upload"
           fi
         working-directory: .
       
