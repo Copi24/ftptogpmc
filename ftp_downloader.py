@@ -74,7 +74,7 @@ class FTPDownloader:
             logger.warning(f"Could not get file size: {e}")
             return None
     
-    def download_file(self, remote_path: str, local_path: Path, chunk_size: int = 8192) -> bool:
+    def download_file(self, remote_path: str, local_path: Path, chunk_size: int = 4*1024*1024) -> bool:
         """
         Download file with resume support.
         Uses FTP REST command to resume from partial downloads.
@@ -206,7 +206,7 @@ def download_with_retry(host: str, user: str, password: str, port: int,
                     time.sleep(wait_time)
                 continue
             
-            success = downloader.download_file(remote_path, local_path, chunk_size=8*1024*1024)  # 8MB chunks for faster throughput
+            success = downloader.download_file(remote_path, local_path, chunk_size=4*1024*1024)  # 4MB chunks for faster transfers
             downloader.disconnect()
             
             if success:
