@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2025-10-31T17:30:58.396506",
+  "last_updated": "2025-10-31T19:08:35.851000",
   "completed": [
     "Blockbuster Movies/009 Re-Cyborg (2012)/009_RE_CYBORG_HSBS_1080p_hevc.mkv",
     "Blockbuster Movies/009 Re-Cyborg (2012)/009_RE_CYBORG_FSBS_4k_hevc.mkv",
@@ -33,7 +33,7 @@
     "Blockbuster Movies/A Nightmare on Elm Street 3 - Dream Warriors (1987)/A Nightmare on Elm Street 3 - Dream Warriors (1987) [tmdbid=10072] hsbs 3dconv woz3d_1080p_hevc.mkv",
     "Blockbuster Movies/A Nightmare on Elm Street 4 - The Dream Master (1988)/A Nightmare on Elm Street 4 - The Dream Master (1988) [tmdbid=10131] hsbs 3dconv woz3d_1080p_hevc.mkv",
     "Blockbuster Movies/A Nightmare on Elm Street 5 - The Dream Child (1989)/A Nightmare on Elm Street 5 - The Dream Child (1989) [tmdbid=10160] hsbs 3dconv woz3d_1080p_hevc.mkv",
-    "Blockbuster Movies/A Nightmare on Elm Street 6 - Freddy's Dead - The Final Nightmare (1991/A Nightmare on Elm Street 6 - Freddy's Dead - The Final Nightmare (1991) [tmdbid=11284] hsbs 3dconv woz3d_1080p_hevc.mkv",
+    "Blockbuster Movies/A Nightmare on Elm Street 6 - Freddy's Dead - The Final Nightmare (1991)/A Nightmare on Elm Street 6 - Freddy's Dead - The Final Nightmare (1991) [tmdbid=11284] hsbs 3dconv woz3d_1080p_hevc.mkv",
     "Blockbuster Movies/A Nightmare on Elm Street 7 - New Nightmare (1994)/A Nightmare on Elm Street 7 - New Nightmare (1994) [tmdbid=11596] hsbs 3dconv woz3d_1080p_hevc.mkv",
     "Blockbuster Movies/A Turtles Tale - Sammys Adventure (2010)/A_Turtles_Tale_Sammys_Adventures_1_The_Secret_Passage_3D_2010_HalfOU_x_1080p_hevc.mkv",
     "Blockbuster Movies/A Turtles Tale - Sammys Adventure (2010)/VR-SBS_3840x_A_Turtle_s_Tale_Sammy_s_Adventure_4k_hevc.mkv",
@@ -45,7 +45,10 @@
     "Blockbuster Movies/A Wrinkle In Time (2018)/AWrinkleInTime_2018_3D-hSBS_1080p_hevc.mkv",
     "Blockbuster Movies/A Wrinkle In Time (2018)/A.Wrinkle.In.Time._2018_.ISORip.3D.Full-SBS.H264.LDF.mp4",
     "Blockbuster Movies/A Wrinkle In Time (2018)/A.Wrinkle.In.Time.2018.3D.1080p.WEBRip.HYBRID.REMASTER3D.Atmos-PiPPiNS.iso",
-    "Blockbuster Movies/Abominable (2019)/Abominable.2019.3D.BluRay.Half-SBS.x.TrueHD.7.1.Atmos-FGT_1080p_hevc.mkv"
+    "Blockbuster Movies/Abominable (2019)/Abominable.2019.3D.BluRay.Half-SBS.x.TrueHD.7.1.Atmos-FGT_1080p_hevc.mkv",
+    "Blockbuster Movies/Abraham Lincoln - Vampire Hunter (2012)/Abraham_Lincoln_Vampire_Hunter_3D_2012_HOU_1080p_hevc.mkv",
+    "Blockbuster Movies/Alice - Through the Looking Glass (2016)/Alice.Through.the.Looking.Glass.2016.3D.BluRay.Half-SBS.x.DTS-HD.MA.7.1-FGT_1080p_hevc.mkv",
+    "Blockbuster Movies/Alice in Wonderland (2010)/VR-SBS_3840x_Alice_in_Wonderland_2010_4k_hevc.mkv"
   ],
   "failed": {
     "Blockbuster Movies/407 Dark Flight 3D (2012)/Dark_Flight_3D_Blu_Ray_2012.iso": {
@@ -67,15 +70,11 @@
       "last_failed": "2025-10-31T17:22:26.108049"
     }
   },
-  "in_progress": {
-    "path": "Blockbuster Movies/xXx - Return of Xander Cage (2017)/xXx.Return.of.Xander.Cage.2017.3D.BluRay.x-PSYCHD_1080p_hevc.mkv",
-    "size": 5942974341,
-    "started_at": "2025-10-31T17:30:58.396497"
-  },
+  "in_progress": null,
   "skipped": [],
   "stats": {
-    "total_uploaded": 44,
+    "total_uploaded": 47,
     "total_failed": 3,
-    "total_bytes": 498978084173
+    "total_bytes": 524000000000
   }
 }
