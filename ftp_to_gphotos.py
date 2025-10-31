@@ -605,6 +605,18 @@ def main():
     
     logger.info("Auth data found (length: {} chars)".format(len(auth_data)))
     
+    # Debug: Check if auth data has required components
+    required_parts = ['androidId=', 'Token=', 'Email=']
+    for part in required_parts:
+        if part in auth_data:
+            logger.info(f"✓ Auth data contains {part}")
+        else:
+            logger.error(f"✗ Auth data MISSING {part}!")
+    
+    # Check for URL encoding
+    if '%' in auth_data:
+        logger.info("✓ Auth data contains URL-encoded characters (%)")
+    
     # Check rclone
     if not check_rclone_installed():
         logger.error("rclone is required but not found!")
