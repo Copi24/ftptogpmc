@@ -37,13 +37,13 @@ logger = logging.getLogger(__name__)
 RCLONE_REMOTE = "3DFF"
 # Try individual servers if combined fails
 RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
-MIN_FILE_SIZE = 20 * 1024 * 1024 * 1024  # 20GB minimum
-MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (sanity check)
-SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v']
+MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
+MAX_FILE_SIZE = 100 * 1024 * 1024 * 1024  # 100GB maximum (sanity check)
+SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
 CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for streaming
 MAX_RETRIES = 3
 RETRY_DELAY = 60  # seconds
-RCLONE_TIMEOUT = 7200  # 2 hours timeout for listing
+RCLONE_TIMEOUT = 600  # 10 minutes timeout for operations
 
 
 def check_rclone_installed() -> bool:
@@ -62,46 +62,66 @@ def check_rclone_installed() -> bool:
         return False
 
 
-def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions: List[str]) -> List[Dict]:
+def list_directories(remote: str, path: str = "") -> List[str]:
     """
-    List large movie files from FTP using rclone.
-    Returns list of dicts with file info.
+    List directories in a path using rclone lsd.
+    Returns list of directory names.
     """
-    logger.info(f"Scanning {remote} for large movie files...")
-    logger.info(f"Looking for files between {min_size / (1024**3):.1f}GB and {max_size / (1024**3):.1f}GB")
-    logger.info(f"Extensions: {', '.join(extensions)}")
-    
-    files = []
-    
     try:
-        # Use rclone ls to get file details recursively
-        # rclone ls is already recursive and only lists files
-        # Add --fast-list and increase timeouts for slow FTP servers
         cmd = [
-            'rclone', 'ls', f'{remote}:',
-            '--fast-list',
-            '--timeout', '600s',
-            '--contimeout', '120s',
-            '--low-level-retries', '10',
-            '--retries', '5'
+            'rclone', 'lsd', f'{remote}:{path}',
+            '--timeout', '120s',
+            '--contimeout', '60s',
+            '--low-level-retries', '5',
+            '--retries', '3'
         ]
         
-        logger.info(f"Running command: {' '.join(cmd)}")
-        logger.info(f"Note: This may take a long time on slow FTP servers...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=RCLONE_TIMEOUT)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         
         if result.returncode != 0:
-            logger.error(f"rclone ls failed with return code {result.returncode}")
-            if result.stderr:
-                # Log only first few errors to avoid clutter
-                error_lines = result.stderr.strip().split('\n')
-                for i, line in enumerate(error_lines[:10]):
-                    logger.error(f"  {line}")
-                if len(error_lines) > 10:
-                    logger.error(f"  ... and {len(error_lines) - 10} more errors")
-            return files
+            logger.warning(f"Failed to list directories in {path}: {result.stderr[:200]}")
+            return []
         
-        # Parse output - format is: size path
+        dirs = []
+        for line in result.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+            # lsd output format: size date time name
+            parts = line.split()
+            if len(parts) >= 4:
+                dir_name = ' '.join(parts[3:])  # Handle names with spaces
+                dirs.append(dir_name)
+        
+        return dirs
+        
+    except Exception as e:
+        logger.warning(f"Error listing directories in {path}: {e}")
+        return []
+
+
+def list_files_in_directory(remote: str, path: str, min_size: int, max_size: int, extensions: List[str]) -> List[Dict]:
+    """
+    List files in a specific directory (non-recursive) using rclone ls.
+    Returns list of dicts with file info.
+    """
+    try:
+        # Use --max-depth 1 to only list files in this directory
+        cmd = [
+            'rclone', 'ls', f'{remote}:{path}',
+            '--max-depth', '1',
+            '--timeout', '300s',
+            '--contimeout', '60s',
+            '--low-level-retries', '5',
+            '--retries', '3'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=420)
+        
+        if result.returncode != 0:
+            logger.warning(f"Failed to list files in {path}: {result.stderr[:200]}")
+            return []
+        
+        files = []
         for line in result.stdout.strip().split('\n'):
             if not line.strip():
                 continue
@@ -109,30 +129,69 @@ def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions
             if len(parts) == 2:
                 try:
                     file_size = int(parts[0])
-                    file_path = parts[1]
+                    file_name = parts[1]
                     
-                    if not any(file_path.lower().endswith(ext.lower()) for ext in extensions):
+                    # Check if it's a supported file type
+                    if not any(file_name.lower().endswith(ext.lower()) for ext in extensions):
                         continue
                     
+                    # Check size
                     if min_size <= file_size <= max_size:
+                        full_path = os.path.join(path, file_name) if path else file_name
                         files.append({
-                            'path': file_path,
+                            'path': full_path,
                             'size': file_size,
                             'size_gb': file_size / (1024**3)
                         })
-                        logger.info(f"Found candidate: {file_path} ({file_size / (1024**3):.2f}GB)")
+                        logger.info(f"  Found: {file_name} ({file_size / (1024**3):.2f}GB)")
                 except ValueError:
                     continue
         
-        logger.info(f"Found {len(files)} large movie files matching criteria")
         return files
         
-    except subprocess.TimeoutExpired:
-        logger.error("rclone command timed out")
-        return files
     except Exception as e:
-        logger.error(f"Error listing files: {e}", exc_info=True)
-        return files
+        logger.warning(f"Error listing files in {path}: {e}")
+        return []
+
+
+def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path, 
+                                     min_size: int, max_size: int, extensions: List[str],
+                                     path: str = "", depth: int = 0) -> tuple:
+    """
+    Traverse directories depth-first and process files immediately.
+    Returns (successful_count, failed_count).
+    """
+    indent = "  " * depth
+    logger.info(f"{indent}📁 Scanning: {path if path else '/' }")
+    
+    successful = 0
+    failed = 0
+    
+    # Process files in current directory
+    files = list_files_in_directory(remote, path, min_size, max_size, extensions)
+    if files:
+        logger.info(f"{indent}Found {len(files)} file(s) in this directory")
+        for file_info in files:
+            if process_file(remote, file_info, auth_data, temp_dir):
+                successful += 1
+            else:
+                failed += 1
+    
+    # Get subdirectories
+    subdirs = list_directories(remote, path)
+    if subdirs:
+        logger.info(f"{indent}Found {len(subdirs)} subdirectory(ies)")
+        for subdir in subdirs:
+            subpath = os.path.join(path, subdir) if path else subdir
+            # Recursively process subdirectory
+            sub_success, sub_failed = traverse_and_process_depth_first(
+                remote, auth_data, temp_dir, min_size, max_size, extensions, 
+                subpath, depth + 1
+            )
+            successful += sub_success
+            failed += sub_failed
+    
+    return successful, failed
 
 
 def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE) -> bool:
@@ -387,41 +446,18 @@ def main():
     logger.info(f"Using temporary directory: {temp_dir}")
     
     try:
-        # List large movie files
-        files = list_large_movie_files(RCLONE_REMOTE, MIN_FILE_SIZE, MAX_FILE_SIZE, SUPPORTED_EXTENSIONS)
+        # Traverse and process files depth-first
+        logger.info("=" * 80)
+        logger.info("Starting depth-first traversal and processing")
+        logger.info(f"Min file size: {MIN_FILE_SIZE / (1024**3):.1f}GB")
+        logger.info(f"Max file size: {MAX_FILE_SIZE / (1024**3):.1f}GB")
+        logger.info(f"Extensions: {', '.join(SUPPORTED_EXTENSIONS)}")
+        logger.info("=" * 80)
         
-        if not files:
-            logger.warning("No large movie files found matching criteria")
-            return
-        
-        logger.info(f"Found {len(files)} files to process")
-        
-        # Process each file
-        successful = 0
-        failed = 0
-        
-        for i, file_info in enumerate(files, 1):
-            logger.info(f"\nProcessing file {i}/{len(files)}")
-            
-            # Check available disk space (need at least file size + 5GB buffer)
-            if sys.platform != 'win32':
-                stat = shutil.disk_usage(temp_dir)
-                free_space = stat.free
-                required_space = file_info['size'] + 5 * 1024 * 1024 * 1024
-                
-                if free_space < required_space:
-                    logger.error(f"Insufficient disk space: {free_space / (1024**3):.1f}GB free, "
-                               f"{required_space / (1024**3):.1f}GB required")
-                    failed += 1
-                    continue
-            
-            if process_file(RCLONE_REMOTE, file_info, auth_data, temp_dir):
-                successful += 1
-            else:
-                failed += 1
-            
-            # Small delay between files
-            time.sleep(5)
+        successful, failed = traverse_and_process_depth_first(
+            RCLONE_REMOTE, auth_data, temp_dir,
+            MIN_FILE_SIZE, MAX_FILE_SIZE, SUPPORTED_EXTENSIONS
+        )
         
         logger.info("=" * 80)
         logger.info(f"Processing complete: {successful} successful, {failed} failed")
