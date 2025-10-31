@@ -110,36 +110,29 @@ class FTPDownloader:
                 if resume_pos > 0:
                     try:
                         # Send REST command - 350 response is expected and valid
-                        self.ftp.putcmd(f'REST {resume_pos}')
-                        # getresp() raises error_reply for intermediate responses like 350
-                        # But 350 is CORRECT - it means "send RETR now"
-                        try:
-                            code, msg = self.ftp.getresp()
-                            logger.info(f"REST response: {code} {msg}")
-                        except ftplib.error_reply as e:
-                            # Check if it's a 350 response (which is valid!)
-                            error_str = str(e)
-                            if '350' in error_str or '350 Restarting' in error_str:
-                                logger.info(f"✓ REST accepted (350 intermediate response) - server waiting for RETR")
-                                # 350 is correct - continue to RETR
-                            else:
-                                # Real error - re-raise
-                                raise
-                        except Exception as e:
-                            # For other exceptions, try to get response anyway
-                            error_str = str(e)
-                            if '350' in error_str:
-                                logger.info(f"✓ REST accepted (350) - continuing")
-                            else:
-                                logger.error(f"REST command failed: {e}")
-                                return False
-                    except Exception as e:
+                        resp = self.ftp.sendcmd(f'REST {resume_pos}')
+                        # 350 response means "restart accepted, send RETR now"
+                        if resp.startswith('350'):
+                            logger.info(f"✓ REST accepted - server ready for RETR (resuming from {resume_pos / (1024**3):.2f}GB)")
+                        elif resp.startswith('200'):
+                            logger.info(f"✓ REST accepted (200 response): {resp}")
+                        else:
+                            logger.warning(f"Unexpected REST response: {resp}")
+                    except ftplib.error_reply as e:
+                        # Check if it's a 350 response (which is valid!)
                         error_str = str(e)
-                        if '350' not in error_str:
+                        if '350' in error_str or '350 Restarting' in error_str:
+                            logger.info(f"✓ REST accepted (350 intermediate response) - server waiting for RETR")
+                        else:
                             logger.error(f"REST command failed: {e}")
                             return False
-                        else:
+                    except Exception as e:
+                        error_str = str(e)
+                        if '350' in error_str:
                             logger.info(f"✓ REST accepted (350 found in error) - continuing")
+                        else:
+                            logger.error(f"REST command failed: {e}")
+                            return False
                 
                 # Start transfer
                 start_time = time.time()
