@@ -106,13 +106,22 @@ class FTPDownloader:
         try:
             with open(local_path, mode) as f:
                 # Send REST command to resume from position
+                # 350 response is SUCCESS (means "restart accepted, send RETR")
                 if resume_pos > 0:
                     try:
+                        # Use sendcmd() which handles 350 as intermediate response
                         response = self.ftp.sendcmd(f'REST {resume_pos}')
-                        logger.info(f"REST response: {response}")
-                        # 350 response means server accepted the restart position
-                        if not response.startswith('350'):
-                            logger.warning(f"Unexpected REST response: {response}")
+                        logger.info(f"✓ REST command accepted: {response}")
+                        # 350 is correct - means ready to resume
+                        if '350' in response or '350' in str(response):
+                            logger.info("✓ Server ready to resume from position")
+                    except ftplib.error_reply as e:
+                        # 350 might trigger error_reply, but it's actually success
+                        if '350' in str(e):
+                            logger.info("✓ REST accepted (350 response)")
+                        else:
+                            logger.error(f"REST command failed: {e}")
+                            return False
                     except Exception as e:
                         logger.error(f"REST command failed: {e}")
                         return False
