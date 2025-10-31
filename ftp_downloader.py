@@ -114,12 +114,15 @@ class FTPDownloader:
                 last_update = start_time
                 bytes_downloaded = resume_pos
                 
+                # Optimized callback - minimize overhead
+                callback_count = 0
                 def callback(data):
-                    nonlocal bytes_downloaded, last_update
+                    nonlocal bytes_downloaded, last_update, callback_count
                     f.write(data)
                     bytes_downloaded += len(data)
+                    callback_count += 1
                     
-                    # Progress update every 5 seconds
+                    # Progress update every 5 seconds (skip work most of the time)
                     now = time.time()
                     if now - last_update >= 5:
                         elapsed = now - start_time
@@ -169,7 +172,8 @@ def download_with_retry(host: str, user: str, password: str, port: int,
                     time.sleep(wait_time)
                 continue
             
-            success = downloader.download_file(remote_path, local_path, chunk_size=1024*1024)  # 1MB chunks
+            # Use larger chunks for better performance (8MB for streaming)
+            success = downloader.download_file(remote_path, local_path, chunk_size=8*1024*1024)  # 8MB chunks
             downloader.disconnect()
             
             if success:
