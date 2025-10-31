@@ -83,6 +83,7 @@ def check_rclone_installed() -> bool:
 def list_directories(remote: str, path: str = "") -> List[str]:
     """
     List directories in a path using rclone lsd.
+    Note: 'remote' here is the server name (e.g. 'Challenger')
     Returns list of directory names.
     """
     try:
