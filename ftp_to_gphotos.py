@@ -218,22 +218,19 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
 def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE, attempt: int = 1) -> bool:
     """
     Stream a file from FTP to local path using rclone copy.
-    FTP doesn't support reliable resume, so we restart from scratch each attempt.
+    Optimized for streaming servers - uses large buffers and no timeouts.
     Returns True if successful, False otherwise.
     """
-    logger.info(f"Streaming {remote_path} to {local_path}... (attempt {attempt})")
+    logger.info(f"🎬 Streaming {remote_path} to {local_path}... (attempt {attempt})")
     
     # Ensure parent directory exists
     local_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Delete any partial file - FTP resume is unreliable
+    # Keep partial file for resume - FTP supports REST command
     if local_path.exists():
         partial_size = local_path.stat().st_size
-        logger.info(f"🗑️ Removing partial download: {partial_size / (1024**3):.2f}GB (FTP resume unreliable)")
-        try:
-            local_path.unlink()
-        except Exception as e:
-            logger.warning(f"Failed to delete partial file: {e}")
+        logger.info(f"🔄 Found partial download: {partial_size / (1024**3):.2f}GB - will resume!")
+        # rclone will automatically skip if file complete, resume if partial
     
     process = None
     try:
@@ -242,24 +239,25 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         remote_dir = os.path.dirname(remote_path).strip('/')
         remote_filename = os.path.basename(remote_path)
         
-        # More aggressive settings for slow/unstable FTP
+        # Streaming-optimized settings for fast FTP server
         cmd = [
             'rclone', 'copy',
             f'{remote}:{remote_path}',
             str(local_path.parent),
             '--progress',
-            '--buffer-size', '8M',  # Even smaller buffer for stability
+            '--buffer-size', '256M',  # LARGE buffer for streaming
             '--transfers', '1',
             '--checkers', '1',
-            '--low-level-retries', '20',  # Many more retries
-            '--retries', '20',
-            '--stats', '15s',  # More frequent stats
+            '--low-level-retries', '10',
+            '--retries', '5',
+            '--stats', '30s',
             '--log-level', 'INFO',
-            '--timeout', '120s',  # 2 minute timeout
-            '--contimeout', '60s',  # 1 minute connection timeout
-            '--tpslimit', '5',  # Even lower transaction limit
-            '--tpslimit-burst', '0',
-            '--no-checksum',  # Skip checksum (faster)
+            '--timeout', '0',  # NO timeout - let it stream!
+            '--contimeout', '300s',  # 5 minutes for initial connection
+            '--no-traverse',  # Don't list, just copy
+            '--no-check-dest',  # Don't verify before copy
+            '--streaming-upload-cutoff', '0',  # Stream everything
+            '--use-mmap',  # Use memory mapping for efficiency
         ]
         
         logger.info(f"Starting download: {' '.join(cmd)}")
@@ -267,7 +265,7 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         last_progress_time = start_time
         last_transferred_gb = 0.0
         stall_start_time = None
-        MAX_STALL_TIME = 90  # Kill if no progress for 90 seconds (faster retry)
+        MAX_STALL_TIME = 300  # 5 minutes - allow for streaming variations
         
         # Run with real-time output
         process = subprocess.Popen(
@@ -487,12 +485,12 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     logger.info(f"✓ Disk space check: {free_space_gb:.1f}GB available, {required_space_gb:.1f}GB needed")
     
     # Try download with aggressive retries (don't give up easily!)
-    max_download_attempts = 3  # Reduced - FTP is very unstable
+    max_download_attempts = 5  # More attempts for large streaming files
     download_success = False
     
     for attempt in range(1, max_download_attempts + 1):
         if attempt > 1:
-            wait_time = 30 * (attempt - 1)  # 0s, 30s, 60s
+            wait_time = 60  # Fixed 60 second wait between attempts
             logger.info(f"⏳ Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
         
