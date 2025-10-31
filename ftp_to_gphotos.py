@@ -57,7 +57,9 @@ FTP_PASS = "NoSymbols"
 CURRENT_SERVER = "Challenger"  # Using Challenger (Blockbuster Movies)
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
 MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (with maximize-build-space we get ~60GB!)
-SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
+# Google Photos only accepts actual media files, not disk images
+# .iso files are Blu-ray disk images, not media files themselves
+SUPPORTED_EXTENSIONS = ['.mkv', '.mp4', '.m4v', '.avi', '.m2ts']  # Removed .iso - GP rejects disk images
 CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for streaming
 MAX_RETRIES = 3
 RETRY_DELAY = 60  # seconds
@@ -467,6 +469,13 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     # Check if should retry failed file
     if state.is_failed(remote_path) and not state.should_retry(remote_path):
         logger.info(f"⏭️  Skipping {file_name} - exceeded max retry attempts")
+        return False
+    
+    # Skip ISO files - Google Photos doesn't accept disk images
+    if remote_path.lower().endswith('.iso'):
+        logger.warning(f"⏭️  Skipping {file_name} - Google Photos doesn't accept .iso disk images")
+        logger.warning(f"💡 Tip: Extract the video file from the ISO first, or use .mkv/.mp4 files")
+        state.mark_skipped(remote_path, "ISO disk image - Google Photos rejects disk images")
         return False
     
     logger.info("=" * 80)
