@@ -38,7 +38,7 @@ RCLONE_REMOTE = "3DFF"
 # Try individual servers if combined fails
 RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
-MAX_FILE_SIZE = 100 * 1024 * 1024 * 1024  # 100GB maximum (sanity check)
+MAX_FILE_SIZE = 12 * 1024 * 1024 * 1024  # 12GB maximum (GitHub Actions has ~14GB free)
 SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
 CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for streaming
 MAX_RETRIES = 3
@@ -105,7 +105,7 @@ def list_directories(remote: str, path: str = "") -> List[str]:
 def list_files_in_directory(remote: str, path: str, min_size: int, max_size: int, extensions: List[str]) -> List[Dict]:
     """
     List files in a specific directory (non-recursive) using rclone ls.
-    Returns list of dicts with file info.
+    Returns list of dicts with file info, sorted by size (smallest first).
     """
     try:
         # Use --max-depth 1 to only list files in this directory
@@ -149,6 +149,11 @@ def list_files_in_directory(remote: str, path: str, min_size: int, max_size: int
                         logger.info(f"  Found: {file_name} ({file_size / (1024**3):.2f}GB)")
                 except ValueError:
                     continue
+        
+        # Sort by size (smallest first) - more likely to complete on unstable FTP
+        files.sort(key=lambda x: x['size'])
+        if files:
+            logger.info(f"  📊 Sorted {len(files)} files by size (smallest first)")
         
         return files
         
@@ -430,26 +435,55 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
     logger.info(f"Local path: {local_path}")
     logger.info("=" * 80)
     
-    # Try download with retries
-    max_download_attempts = 2
+    # Check available disk space before downloading
+    stat = shutil.disk_usage(temp_dir)
+    free_space_gb = stat.free / (1024**3)
+    required_space_gb = file_info['size_gb'] + 2  # File size + 2GB buffer
+    
+    if free_space_gb < required_space_gb:
+        logger.error(f"❌ Insufficient disk space!")
+        logger.error(f"   Available: {free_space_gb:.1f}GB")
+        logger.error(f"   Required: {required_space_gb:.1f}GB")
+        logger.error(f"   Skipping this file (too large for available space)")
+        return False
+    
+    logger.info(f"✓ Disk space check: {free_space_gb:.1f}GB available, {required_space_gb:.1f}GB needed")
+    
+    # Try download with aggressive retries (don't give up easily!)
+    max_download_attempts = 5  # More attempts
     download_success = False
     
     for attempt in range(1, max_download_attempts + 1):
         if attempt > 1:
-            logger.info(f"Download attempt {attempt}/{max_download_attempts} for {file_name}")
-            time.sleep(30)  # Wait before retry
+            wait_time = 30 * attempt  # Increasing wait: 30s, 60s, 90s, 120s
+            logger.info(f"🔄 Download attempt {attempt}/{max_download_attempts} for {file_name}")
+            logger.info(f"⏳ Waiting {wait_time}s before retry to let FTP server recover...")
+            time.sleep(wait_time)
         
         download_success = stream_file_from_ftp(remote, remote_path, local_path)
         
         if download_success:
+            logger.info(f"✅ Download successful on attempt {attempt}!")
             break
         else:
-            logger.warning(f"Download attempt {attempt} failed")
+            logger.warning(f"❌ Download attempt {attempt}/{max_download_attempts} failed")
+            
+            # Clean up partial download if exists
+            if local_path.exists():
+                try:
+                    local_path.unlink()
+                    logger.info(f"🗑️ Cleaned up partial download")
+                except:
+                    pass
+            
             if attempt < max_download_attempts:
-                logger.info("Will retry...")
+                logger.info(f"💪 Will retry (attempt {attempt + 1}/{max_download_attempts})...")
+            else:
+                logger.error(f"💔 All {max_download_attempts} download attempts exhausted")
     
     if not download_success:
-        logger.error(f"Failed to download {remote_path} after {max_download_attempts} attempts - SKIPPING")
+        logger.error(f"❌ Failed to download {remote_path} after {max_download_attempts} attempts")
+        logger.error(f"⚠️ This file will be retried on next workflow run")
         return False
     
     # Verify file exists - rclone preserves original filename
