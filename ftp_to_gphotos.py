@@ -40,7 +40,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-RCLONE_REMOTE = "3DFF"
+# TEST: Using direct server instead of combine remote (may be more stable)
+RCLONE_REMOTE = "3DFlickFix3"  # Challenger server
 # Try individual servers if combined fails
 RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
