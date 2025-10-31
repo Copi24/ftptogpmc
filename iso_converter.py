@@ -130,45 +130,122 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             str(output_file)
         ]
         
+        # Add progress reporting to ffmpeg command
+        cmd.extend(['-progress', 'pipe:1', '-loglevel', 'info'])
+        
         logger.info(f"Running: {' '.join(cmd)}")
         
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1
         )
         
-        # Monitor progress with timeout detection
+        # Monitor progress with timeout detection and file size monitoring
         last_output_time = time.time()
-        TIMEOUT_SECONDS = 300  # 5 minutes without output = stuck
+        last_file_size = 0
+        last_size_check_time = time.time()
+        TIMEOUT_SECONDS = 600  # 10 minutes without progress = stuck
         last_progress_line = None
+        start_time = time.time()
         
-        for line in process.stdout:
-            if line.strip():
-                last_output_time = time.time()
-                # Log all ffmpeg output lines (they contain progress info)
-                if 'Duration:' in line or 'time=' in line or 'frame=' in line or 'size=' in line:
-                    logger.info(f"ffmpeg: {line.strip()}")
-                    last_progress_line = line.strip()
-                else:
-                    # Log other lines at debug level
-                    logger.debug(f"ffmpeg: {line.strip()}")
+        import threading
+        import queue
+        
+        # Queue for collecting output
+        output_queue = queue.Queue()
+        error_queue = queue.Queue()
+        
+        def read_stdout():
+            for line in process.stdout:
+                if line.strip():
+                    output_queue.put(('stdout', line.strip()))
+        
+        def read_stderr():
+            for line in process.stderr:
+                if line.strip():
+                    error_queue.put(('stderr', line.strip()))
+        
+        # Start reading threads
+        stdout_thread = threading.Thread(target=read_stdout, daemon=True)
+        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        
+        # Monitor both queues and file size
+        while process.poll() is None:
+            # Check stdout
+            try:
+                source, line = output_queue.get_nowait()
+                if 'out_time_ms=' in line or 'size=' in line or 'bitrate=' in line:
+                    logger.info(f"ffmpeg progress: {line}")
+                    last_output_time = time.time()
+                    last_progress_line = line
+            except queue.Empty:
+                pass
             
-            # Check for timeout - if no output for 5 minutes, consider stuck
+            # Check stderr
+            try:
+                source, line = error_queue.get_nowait()
+                if 'Duration:' in line or 'time=' in line or 'frame=' in line or 'bitrate=' in line:
+                    logger.info(f"ffmpeg: {line}")
+                    last_output_time = time.time()
+                    last_progress_line = line
+            except queue.Empty:
+                pass
+            
+            # Check file size growth (every 30 seconds)
+            if time.time() - last_size_check_time >= 30:
+                if output_file.exists():
+                    current_size = output_file.stat().st_size
+                    if current_size > last_file_size:
+                        logger.info(f"📊 Output file growing: {current_size / (1024**3):.2f}GB (+{(current_size - last_file_size) / (1024**2):.1f}MB)")
+                        last_file_size = current_size
+                        last_output_time = time.time()
+                    else:
+                        logger.warning(f"⚠️ Output file size unchanged: {current_size / (1024**3):.2f}GB")
+                last_size_check_time = time.time()
+            
+            # Check for timeout
             elapsed_since_output = time.time() - last_output_time
             if elapsed_since_output > TIMEOUT_SECONDS:
-                logger.error(f"❌ FFmpeg appears stuck - no output for {TIMEOUT_SECONDS}s")
+                logger.error(f"❌ FFmpeg appears stuck - no progress for {TIMEOUT_SECONDS/60:.0f} minutes")
                 logger.error(f"Last progress: {last_progress_line}")
+                if output_file.exists():
+                    logger.error(f"Output file size: {output_file.stat().st_size / (1024**3):.2f}GB")
                 process.kill()
                 process.wait()
                 return False
+            
+            time.sleep(1)  # Don't spin too fast
         
-        # Wait for process to complete
+        # Wait for threads and collect remaining output
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+        
+        # Collect remaining output
+        while True:
+            try:
+                source, line = output_queue.get_nowait()
+                if 'out_time_ms=' in line or 'size=' in line:
+                    logger.info(f"ffmpeg: {line}")
+            except queue.Empty:
+                break
+        
+        while True:
+            try:
+                source, line = error_queue.get_nowait()
+                if line.strip():
+                    logger.debug(f"ffmpeg stderr: {line}")
+            except queue.Empty:
+                break
+        
+        # Process has finished - wait for return code
         process.wait()
         
-        # If we got here and process failed, log the exit code
+        # Check return code
         if process.returncode != 0:
             logger.error(f"❌ FFmpeg process exited with code {process.returncode}")
             return False
