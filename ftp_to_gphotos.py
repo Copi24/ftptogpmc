@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Optional
 import time
+import requests
 
 try:
     from gpmc import Client
@@ -625,8 +626,13 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
         logger.info(f"💾 Quality: ORIGINAL (unlimited)")
         logger.info("=" * 80)
         
-        # Mark as completed in state
+        # Mark as completed in state (saves immediately)
         state.mark_completed(remote_path, file_info['size'], media_key)
+        logger.info("💾 State saved after successful upload")
+        
+        # Try to upload state as artifact using gh CLI (for persistence if workflow times out)
+        # This is a best-effort attempt - won't fail if it doesn't work
+        upload_state_artifact(state.state_file)
         
         # Clean up local file to free space immediately
         try:
