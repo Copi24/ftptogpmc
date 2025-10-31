@@ -36,6 +36,13 @@ jobs:
         with:
           path: 'repo'
       
+      - name: Download previous state (if exists)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: upload-state
+          path: repo/
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -80,6 +87,15 @@ jobs:
           path: |
             repo/ftp_to_gphotos.log
           retention-days: 7
+      
+      - name: Upload state for next run
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: upload-state
+          path: repo/upload_state.json
+          retention-days: 90
+          overwrite: true
       
       - name: Check disk space
         if: always()

@@ -32,6 +32,9 @@ ENV/
 *.log
 ftp_to_gphotos.log
 
+# State file (persisted as artifact)
+upload_state.json
+
 # IDE
 .vscode/
 .idea/
