@@ -140,20 +140,49 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             bufsize=1
         )
         
-        # Monitor progress
-        for line in process.stdout:
-            if 'Duration:' in line or 'time=' in line or 'frame=' in line:
-                logger.info(f"ffmpeg: {line.strip()}")
+        # Monitor progress with timeout detection
+        last_output_time = time.time()
+        TIMEOUT_SECONDS = 300  # 5 minutes without output = stuck
+        last_progress_line = None
         
+        for line in process.stdout:
+            if line.strip():
+                last_output_time = time.time()
+                # Log all ffmpeg output lines (they contain progress info)
+                if 'Duration:' in line or 'time=' in line or 'frame=' in line or 'size=' in line:
+                    logger.info(f"ffmpeg: {line.strip()}")
+                    last_progress_line = line.strip()
+                else:
+                    # Log other lines at debug level
+                    logger.debug(f"ffmpeg: {line.strip()}")
+            
+            # Check for timeout - if no output for 5 minutes, consider stuck
+            elapsed_since_output = time.time() - last_output_time
+            if elapsed_since_output > TIMEOUT_SECONDS:
+                logger.error(f"❌ FFmpeg appears stuck - no output for {TIMEOUT_SECONDS}s")
+                logger.error(f"Last progress: {last_progress_line}")
+                process.kill()
+                process.wait()
+                return False
+        
+        # Wait for process to complete
         process.wait()
         
-        if process.returncode == 0 and output_file.exists():
+        # If we got here and process failed, log the exit code
+        if process.returncode != 0:
+            logger.error(f"❌ FFmpeg process exited with code {process.returncode}")
+            return False
+        
+        if output_file.exists() and output_file.stat().st_size > 0:
             input_size = input_file.stat().st_size
             output_size = output_file.stat().st_size
             logger.info(f"✅ Remux complete! {input_size / (1024**3):.2f}GB → {output_size / (1024**3):.2f}GB")
             return True
         else:
-            logger.error(f"❌ Remux failed with code {process.returncode}")
+            if process.returncode != 0:
+                logger.error(f"❌ Remux failed with code {process.returncode}")
+            else:
+                logger.error(f"❌ Remux completed but output file is missing or empty")
             return False
             
     except FileNotFoundError:
