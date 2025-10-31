@@ -88,13 +88,36 @@ jobs:
           pip install https://github.com/xob0t/google_photos_mobile_client/archive/refs/heads/main.zip --force-reinstall
           pip install requests
       
-      - name: Run transfer script
+      - name: Run transfer script (with periodic state upload)
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: repo
         run: |
-          python3 ftp_to_gphotos.py
+          # Run script in background and periodically upload state
+          python3 ftp_to_gphotos.py &
+          SCRIPT_PID=$!
+          
+          # Upload state every 30 minutes while script runs
+          while kill -0 $SCRIPT_PID 2>/dev/null; do
+            sleep 1800  # 30 minutes
+            if [ -f "upload_state.json" ]; then
+              echo "📤 Uploading state file (periodic backup)..."
+              gh run upload ${{ github.run_id }} upload_state.json --name upload-state --pattern upload_state.json || true
+            fi
+          done
+          
+          # Wait for script to finish
+          wait $SCRIPT_PID
+          SCRIPT_EXIT=$?
+          
+          # Final state upload
+          if [ -f "upload_state.json" ]; then
+            echo "📤 Final state file upload..."
+            gh run upload ${{ github.run_id }} upload_state.json --name upload-state --pattern upload_state.json || true
+          fi
+          
+          exit $SCRIPT_EXIT
         continue-on-error: true
       
       - name: Upload logs
@@ -106,7 +129,7 @@ jobs:
             repo/ftp_to_gphotos.log
           retention-days: 7
       
-      - name: Upload state for next run
+      - name: Upload state for next run (final)
         uses: actions/upload-artifact@v4
         if: always()
         with:
