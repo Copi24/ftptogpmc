@@ -71,64 +71,28 @@ def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions
     files = []
     
     try:
-        # Use rclone ls with JSON to get file details recursively
-        # Format: size path
+        # Use rclone ls to get file details recursively
+        # rclone ls is already recursive and only lists files
         cmd = [
-            'rclone', 'ls', f'{remote}:',
-            '--recursive',
-            '--files-only',
-            '--json'
+            'rclone', 'ls', f'{remote}:'
         ]
         
         logger.info(f"Running command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         
         if result.returncode != 0:
             logger.error(f"rclone ls failed: {result.stderr}")
-            # Try alternative method
-            logger.info("Trying alternative method without JSON...")
-            cmd = [
-                'rclone', 'ls', f'{remote}:',
-                '--recursive',
-                '--files-only'
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-            
-            if result.returncode != 0:
-                logger.error(f"Alternative method also failed: {result.stderr}")
-                return files
-            
-            # Parse non-JSON output
-            for line in result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
-                parts = line.split(None, 1)
-                if len(parts) == 2:
-                    try:
-                        file_size = int(parts[0])
-                        file_path = parts[1]
-                        
-                        if not any(file_path.lower().endswith(ext.lower()) for ext in extensions):
-                            continue
-                        
-                        if min_size <= file_size <= max_size:
-                            files.append({
-                                'path': file_path,
-                                'size': file_size,
-                                'size_gb': file_size / (1024**3)
-                            })
-                            logger.info(f"Found candidate: {file_path} ({file_size / (1024**3):.2f}GB)")
-                    except ValueError:
-                        continue
-        else:
-            # Parse JSON output
-            for line in result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
+            return files
+        
+        # Parse output - format is: size path
+        for line in result.stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+            parts = line.split(None, 1)
+            if len(parts) == 2:
                 try:
-                    data = json.loads(line)
-                    file_path = data.get('Path', '')
-                    file_size = data.get('Size', 0)
+                    file_size = int(parts[0])
+                    file_path = parts[1]
                     
                     if not any(file_path.lower().endswith(ext.lower()) for ext in extensions):
                         continue
@@ -140,7 +104,7 @@ def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions
                             'size_gb': file_size / (1024**3)
                         })
                         logger.info(f"Found candidate: {file_path} ({file_size / (1024**3):.2f}GB)")
-                except json.JSONDecodeError:
+                except ValueError:
                     continue
         
         logger.info(f"Found {len(files)} large movie files matching criteria")
