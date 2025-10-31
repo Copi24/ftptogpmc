@@ -206,7 +206,7 @@ def download_with_retry(host: str, user: str, password: str, port: int,
                     time.sleep(wait_time)
                 continue
             
-            success = downloader.download_file(remote_path, local_path, chunk_size=1024*1024)  # 1MB chunks
+            success = downloader.download_file(remote_path, local_path, chunk_size=8*1024*1024)  # 8MB chunks for faster throughput
             downloader.disconnect()
             
             if success:
