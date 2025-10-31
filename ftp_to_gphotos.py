@@ -242,6 +242,9 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         logger.info(f"Starting download: {' '.join(cmd)}")
         start_time = time.time()
         last_progress_time = start_time
+        last_bytes = 0.0
+        stall_count = 0
+        MAX_STALLS = 3  # Kill if stalled 3 checks in a row (90 seconds)
         
         # Run with real-time output
         process = subprocess.Popen(
@@ -252,12 +255,39 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             bufsize=1
         )
         
-        # Stream output with periodic progress updates
+        # Stream output with stall detection
         for line in process.stdout:
             line = line.strip()
             if line:
-                # Log progress every 30 seconds
                 current_time = time.time()
+                
+                # Extract transferred bytes to detect stalls
+                if 'Transferred:' in line and 'GiB' in line:
+                    try:
+                        # Parse "Transferred:   1.233 GiB / 7.098 GiB"
+                        parts = line.split('Transferred:')[1].strip()
+                        current_str = parts.split('GiB')[0].strip().split('/')[0].strip()
+                        current_bytes = float(current_str)
+                        
+                        # Check if stuck at same byte count
+                        if abs(current_bytes - last_bytes) < 0.05:  # Less than 50MB progress
+                            stall_count += 1
+                            logger.warning(f"⚠️ Stall detected #{stall_count}/{MAX_STALLS} at {current_bytes:.2f}GB")
+                            
+                            if stall_count >= MAX_STALLS:
+                                logger.error(f"💀 Download STUCK at {current_bytes:.2f}GB for {stall_count * 30}s - KILLING PROCESS")
+                                process.kill()
+                                break
+                        else:
+                            if stall_count > 0:
+                                logger.info(f"✓ Progress resumed (was stalled {stall_count} times)")
+                            stall_count = 0  # Reset if making progress
+                        
+                        last_bytes = current_bytes
+                    except Exception as e:
+                        logger.debug(f"Failed to parse bytes: {e}")
+                
+                # Log progress every 30 seconds
                 if current_time - last_progress_time >= 30:
                     logger.info(f"rclone progress: {line}")
                     last_progress_time = current_time
