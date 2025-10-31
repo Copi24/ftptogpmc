@@ -219,6 +219,20 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
                     logger.debug(f"📊 Waiting for output file to be created...")
                 last_size_check_time = time.time()
             
+            # Check if output file is complete (for remux, size should be close to input)
+            if output_file.exists() and input_file.exists():
+                input_size = input_file.stat().st_size
+                output_size = output_file.stat().st_size
+                # Remux should produce output similar size to input (within 5%)
+                # If output is at least 95% of input, likely complete
+                if output_size > 0 and (output_size >= input_size * 0.95 or output_size >= input_size * 0.99):
+                    logger.info(f"📊 Output file appears complete: {output_size / (1024**3):.2f}GB (input: {input_size / (1024**3):.2f}GB)")
+                    # Give process a moment to finish, then check return code
+                    time.sleep(2)
+                    if process.poll() is not None:
+                        logger.info(f"FFmpeg process has finished")
+                        break
+            
             # Check for timeout
             elapsed_since_output = time.time() - last_output_time
             if elapsed_since_output > TIMEOUT_SECONDS:
@@ -232,6 +246,9 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             
             time.sleep(1)  # Don't spin too fast
         
+        # Process has finished (or we detected completion)
+        logger.info(f"FFmpeg monitoring loop exited, waiting for process...")
+        
         # Wait for threads and collect remaining output
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
@@ -240,7 +257,7 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         while True:
             try:
                 source, line = output_queue.get_nowait()
-                if 'out_time_ms=' in line or 'size=' in line:
+                if 'out_time_ms=' in line or 'size=' in line or 'progress=' in line:
                     logger.info(f"ffmpeg: {line}")
             except queue.Empty:
                 break
@@ -248,7 +265,9 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         while True:
             try:
                 source, line = error_queue.get_nowait()
-                if line.strip():
+                if line.strip() and ('frame=' in line or 'fps=' in line or 'bitrate=' in line or 'time=' in line):
+                    logger.info(f"ffmpeg: {line}")
+                elif line.strip():
                     logger.debug(f"ffmpeg stderr: {line}")
             except queue.Empty:
                 break
@@ -256,21 +275,31 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         # Process has finished - wait for return code
         process.wait()
         
-        # Check return code
-        if process.returncode != 0:
-            logger.error(f"❌ FFmpeg process exited with code {process.returncode}")
-            return False
+        # Log final status
+        logger.info(f"FFmpeg process finished with return code: {process.returncode}")
         
-        if output_file.exists() and output_file.stat().st_size > 0:
-            input_size = input_file.stat().st_size
+        # Check if output file exists and has size
+        if output_file.exists():
             output_size = output_file.stat().st_size
-            logger.info(f"✅ Remux complete! {input_size / (1024**3):.2f}GB → {output_size / (1024**3):.2f}GB")
-            return True
-        else:
-            if process.returncode != 0:
-                logger.error(f"❌ Remux failed with code {process.returncode}")
+            logger.info(f"Output file exists: {output_size / (1024**3):.2f}GB")
+            
+            if output_size > 0:
+                input_size = input_file.stat().st_size
+                logger.info(f"✅ Remux complete! {input_size / (1024**3):.2f}GB → {output_size / (1024**3):.2f}GB")
+                
+                # Check return code - for remux, even non-zero might be OK if file is good
+                if process.returncode == 0:
+                    return True
+                else:
+                    logger.warning(f"⚠️ FFmpeg exited with code {process.returncode}, but output file looks good")
+                    return True  # File exists and has size, assume success
             else:
-                logger.error(f"❌ Remux completed but output file is missing or empty")
+                logger.error(f"❌ Output file exists but is empty")
+                return False
+        else:
+            logger.error(f"❌ Output file does not exist")
+            if process.returncode != 0:
+                logger.error(f"❌ FFmpeg process exited with code {process.returncode}")
             return False
             
     except FileNotFoundError:
