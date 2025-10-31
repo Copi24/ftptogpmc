@@ -476,6 +476,59 @@ def upload_to_google_photos(file_path: Path, auth_data: str, retries: int = MAX_
     return None
 
 
+def upload_state_artifact(state_file: Path) -> bool:
+    """
+    Attempt to upload state file as artifact using GitHub CLI (gh).
+    This ensures state persists even if workflow times out.
+    Returns True if successful, False otherwise (won't fail script).
+    """
+    # Only in GitHub Actions environment
+    if not os.getenv('GITHUB_ACTIONS'):
+        return False
+    
+    if not state_file.exists():
+        return False
+    
+    try:
+        # Use gh CLI to upload artifact (available in GitHub Actions runners)
+        # This overwrites the artifact with latest state after each file
+        github_run_id = os.getenv('GITHUB_RUN_ID')
+        github_token = os.getenv('GITHUB_TOKEN')
+        
+        if not github_run_id or not github_token:
+            return False
+        
+        cmd = [
+            'gh', 'run', 'upload',
+            github_run_id,
+            str(state_file),
+            '--name', 'upload-state',
+            '--pattern', 'upload_state.json'
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, 'GH_TOKEN': github_token}
+        )
+        
+        if result.returncode == 0:
+            logger.info("✅ State file uploaded as artifact (persisted)")
+            return True
+        else:
+            logger.debug(f"Could not upload state via gh CLI (this is OK): {result.stderr[:100] if result.stderr else 'unknown error'}")
+            return False
+    except FileNotFoundError:
+        # gh CLI might not be available - that's OK, workflow step will upload at end
+        logger.debug("gh CLI not available - workflow step will upload at end")
+        return False
+    except Exception as e:
+        logger.debug(f"Could not upload state artifact (this is OK): {e}")
+        return False
+
+
 def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, state: StateManager) -> bool:
     """
     Process a single file: download from FTP and upload to Google Photos.
