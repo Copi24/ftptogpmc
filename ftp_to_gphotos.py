@@ -215,21 +215,25 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     return successful, failed
 
 
-def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE, resume: bool = True) -> bool:
+def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE, attempt: int = 1) -> bool:
     """
     Stream a file from FTP to local path using rclone copy.
-    Supports resume if file partially downloaded.
+    FTP doesn't support reliable resume, so we restart from scratch each attempt.
     Returns True if successful, False otherwise.
     """
-    logger.info(f"Streaming {remote_path} to {local_path}...")
+    logger.info(f"Streaming {remote_path} to {local_path}... (attempt {attempt})")
     
     # Ensure parent directory exists
     local_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Check if partial file exists
-    if local_path.exists() and resume:
+    # Delete any partial file - FTP resume is unreliable
+    if local_path.exists():
         partial_size = local_path.stat().st_size
-        logger.info(f"🔄 Found partial download: {partial_size / (1024**3):.2f}GB - will attempt resume")
+        logger.info(f"🗑️ Removing partial download: {partial_size / (1024**3):.2f}GB (FTP resume unreliable)")
+        try:
+            local_path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete partial file: {e}")
     
     process = None
     try:
@@ -238,36 +242,32 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         remote_dir = os.path.dirname(remote_path).strip('/')
         remote_filename = os.path.basename(remote_path)
         
+        # More aggressive settings for slow/unstable FTP
         cmd = [
             'rclone', 'copy',
             f'{remote}:{remote_path}',
             str(local_path.parent),
             '--progress',
-            '--buffer-size', '16M',  # Smaller buffer for unstable connections
+            '--buffer-size', '8M',  # Even smaller buffer for stability
             '--transfers', '1',
             '--checkers', '1',
-            '--low-level-retries', '10',  # More retries
-            '--retries', '10',  # More retries
-            '--stats', '30s',
+            '--low-level-retries', '20',  # Many more retries
+            '--retries', '20',
+            '--stats', '15s',  # More frequent stats
             '--log-level', 'INFO',
-            '--timeout', '180s',  # 3 minute timeout (shorter to detect hangs faster)
-            '--contimeout', '90s',  # 90 second connection timeout
-            '--tpslimit', '10',  # Limit to 10 transactions per second
-            '--tpslimit-burst', '0',  # No burst
-            '--ignore-existing',  # Don't re-download if file complete
+            '--timeout', '120s',  # 2 minute timeout
+            '--contimeout', '60s',  # 1 minute connection timeout
+            '--tpslimit', '5',  # Even lower transaction limit
+            '--tpslimit-burst', '0',
+            '--no-checksum',  # Skip checksum (faster)
         ]
-        
-        # Add resume support if partial file exists
-        if local_path.exists() and resume:
-            # Use --append-only for FTP resume (not --append as that's for other protocols)
-            logger.info("⚡ Resume mode enabled - continuing from partial download")
         
         logger.info(f"Starting download: {' '.join(cmd)}")
         start_time = time.time()
         last_progress_time = start_time
         last_transferred_gb = 0.0
         stall_start_time = None
-        MAX_STALL_TIME = 120  # Kill if no progress for 2 minutes
+        MAX_STALL_TIME = 90  # Kill if no progress for 90 seconds (faster retry)
         
         # Run with real-time output
         process = subprocess.Popen(
