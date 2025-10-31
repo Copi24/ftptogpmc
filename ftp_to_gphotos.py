@@ -233,8 +233,8 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             '--retries', '10',  # More retries
             '--stats', '30s',
             '--log-level', 'INFO',
-            '--timeout', '600s',  # 10 minute timeout
-            '--contimeout', '120s',  # 2 minute connection timeout
+            '--timeout', '180s',  # 3 minute timeout (shorter to detect hangs faster)
+            '--contimeout', '90s',  # 90 second connection timeout
             '--tpslimit', '10',  # Limit to 10 transactions per second
             '--tpslimit-burst', '0'  # No burst
         ]
@@ -242,9 +242,9 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         logger.info(f"Starting download: {' '.join(cmd)}")
         start_time = time.time()
         last_progress_time = start_time
-        last_bytes = 0.0
-        stall_count = 0
-        MAX_STALLS = 3  # Kill if stalled 3 checks in a row (90 seconds)
+        last_transferred_gb = 0.0
+        stall_start_time = None
+        MAX_STALL_TIME = 120  # Kill if no progress for 2 minutes
         
         # Run with real-time output
         process = subprocess.Popen(
@@ -261,31 +261,36 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             if line:
                 current_time = time.time()
                 
-                # Extract transferred bytes to detect stalls
+                # Extract current transferred amount to detect stalls
                 if 'Transferred:' in line and 'GiB' in line:
                     try:
                         # Parse "Transferred:   1.233 GiB / 7.098 GiB"
                         parts = line.split('Transferred:')[1].strip()
                         current_str = parts.split('GiB')[0].strip().split('/')[0].strip()
-                        current_bytes = float(current_str)
+                        current_gb = float(current_str)
                         
-                        # Check if stuck at same byte count
-                        if abs(current_bytes - last_bytes) < 0.05:  # Less than 50MB progress
-                            stall_count += 1
-                            logger.warning(f"⚠️ Stall detected #{stall_count}/{MAX_STALLS} at {current_bytes:.2f}GB")
-                            
-                            if stall_count >= MAX_STALLS:
-                                logger.error(f"💀 Download STUCK at {current_bytes:.2f}GB for {stall_count * 30}s - KILLING PROCESS")
-                                process.kill()
-                                break
+                        # Check if we're making progress
+                        if abs(current_gb - last_transferred_gb) < 0.01:  # Less than 10MB progress
+                            if stall_start_time is None:
+                                stall_start_time = current_time
+                                logger.warning(f"⚠️ Download stalled at {current_gb:.3f}GB")
+                            else:
+                                stall_duration = current_time - stall_start_time
+                                if stall_duration > MAX_STALL_TIME:
+                                    logger.error(f"💀 Download STUCK at {current_gb:.3f}GB for {stall_duration:.0f}s - KILLING")
+                                    process.kill()
+                                    time.sleep(1)
+                                    break
+                                elif stall_duration > 60:
+                                    logger.warning(f"⏳ Still stalled at {current_gb:.3f}GB ({stall_duration:.0f}s)")
                         else:
-                            if stall_count > 0:
-                                logger.info(f"✓ Progress resumed (was stalled {stall_count} times)")
-                            stall_count = 0  # Reset if making progress
-                        
-                        last_bytes = current_bytes
+                            # Progress detected
+                            if stall_start_time is not None:
+                                logger.info(f"✓ Progress resumed from {last_transferred_gb:.3f}GB to {current_gb:.3f}GB")
+                            stall_start_time = None
+                            last_transferred_gb = current_gb
                     except Exception as e:
-                        logger.debug(f"Failed to parse bytes: {e}")
+                        logger.debug(f"Failed to parse transfer amount: {e}")
                 
                 # Log progress every 30 seconds
                 if current_time - last_progress_time >= 30:
