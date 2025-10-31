@@ -40,10 +40,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-# TEST: Using direct server instead of combine remote (may be more stable)
-RCLONE_REMOTE = "3DFlickFix3"  # Challenger server
-# Try individual servers if combined fails
-RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
+# Using direct FTP (no combine remote) for better reliability
+RCLONE_REMOTE = "Challenger"  # Direct FTP to Challenger server
+# Other direct servers available
+RCLONE_REMOTES = ["Challenger", "Tamarind", "Sputnik"]
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
 MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (with maximize-build-space we get ~60GB!)
 SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
