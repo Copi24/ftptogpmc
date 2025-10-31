@@ -207,7 +207,28 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     files = list_files_in_directory(remote, path, min_size, max_size, extensions)
     if files:
         logger.info(f"{indent}✓ Found {len(files)} file(s) in this directory")
+        
+        # Filter out already completed files BEFORE processing
+        files_to_process = []
+        skipped_count = 0
+        
         for file_info in files:
+            remote_path = file_info['path']
+            file_name = os.path.basename(remote_path)
+            
+            # Check if already completed - skip immediately
+            if state.is_completed(remote_path):
+                logger.info(f"{indent}⏭️  SKIPPING {file_name} - already uploaded (found in state)")
+                skipped_count += 1
+                continue
+            
+            files_to_process.append(file_info)
+        
+        if skipped_count > 0:
+            logger.info(f"{indent}📊 Skipped {skipped_count} already uploaded file(s)")
+        
+        # Process remaining files
+        for file_info in files_to_process:
             if process_file(remote, file_info, auth_data, temp_dir, state):
                 successful += 1
             else:
