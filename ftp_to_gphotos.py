@@ -35,12 +35,15 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 RCLONE_REMOTE = "3DFF"
+# Try individual servers if combined fails
+RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
 MIN_FILE_SIZE = 20 * 1024 * 1024 * 1024  # 20GB minimum
 MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (sanity check)
 SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v']
 CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for streaming
 MAX_RETRIES = 3
 RETRY_DELAY = 60  # seconds
+RCLONE_TIMEOUT = 7200  # 2 hours timeout for listing
 
 
 def check_rclone_installed() -> bool:
@@ -73,15 +76,29 @@ def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions
     try:
         # Use rclone ls to get file details recursively
         # rclone ls is already recursive and only lists files
+        # Add --fast-list and increase timeouts for slow FTP servers
         cmd = [
-            'rclone', 'ls', f'{remote}:'
+            'rclone', 'ls', f'{remote}:',
+            '--fast-list',
+            '--timeout', '600s',
+            '--contimeout', '120s',
+            '--low-level-retries', '10',
+            '--retries', '5'
         ]
         
         logger.info(f"Running command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        logger.info(f"Note: This may take a long time on slow FTP servers...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=RCLONE_TIMEOUT)
         
         if result.returncode != 0:
-            logger.error(f"rclone ls failed: {result.stderr}")
+            logger.error(f"rclone ls failed with return code {result.returncode}")
+            if result.stderr:
+                # Log only first few errors to avoid clutter
+                error_lines = result.stderr.strip().split('\n')
+                for i, line in enumerate(error_lines[:10]):
+                    logger.error(f"  {line}")
+                if len(error_lines) > 10:
+                    logger.error(f"  ... and {len(error_lines) - 10} more errors")
             return files
         
         # Parse output - format is: size path
