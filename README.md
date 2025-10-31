@@ -56,7 +56,7 @@ Your rclone configuration file content. Example:
 [3DFlickFix]
 type = ftp
 host = sputnik.whatbox.ca
-user = Lomusire
+user = your_username
 port = 13017
 explicit_tls = true
 pass = your_password
@@ -65,7 +65,7 @@ no_check_certificate = true
 [3DFlickFix2]
 type = ftp
 host = tamarind.whatbox.ca
-user = Lomusire
+user = your_username
 port = 13017
 explicit_tls = true
 pass = your_password
@@ -74,7 +74,7 @@ no_check_certificate = true
 [3DFlickFix3]
 type = ftp
 host = challenger.whatbox.ca
-user = Lomusire
+user = your_username
 port = 13017
 explicit_tls = true
 pass = your_password
