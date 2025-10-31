@@ -511,7 +511,7 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     )
     
     if not download_success:
-        error_msg = f"Failed to download after {max_download_attempts} attempts"
+        error_msg = f"Failed to download after 5 attempts"
         logger.error(f"❌ {error_msg}")
         logger.error(f"⚠️ This file will be retried on next workflow run")
         state.mark_failed(remote_path, error_msg)
