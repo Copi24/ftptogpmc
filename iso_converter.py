@@ -195,16 +195,28 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             except queue.Empty:
                 pass
             
-            # Check file size growth (every 30 seconds)
-            if time.time() - last_size_check_time >= 30:
+            # Check file size growth (every 10 seconds for better feedback)
+            if time.time() - last_size_check_time >= 10:
                 if output_file.exists():
                     current_size = output_file.stat().st_size
                     if current_size > last_file_size:
-                        logger.info(f"📊 Output file growing: {current_size / (1024**3):.2f}GB (+{(current_size - last_file_size) / (1024**2):.1f}MB)")
+                        growth_mb = (current_size - last_file_size) / (1024**2)
+                        logger.info(f"📊 Output file growing: {current_size / (1024**3):.2f}GB (+{growth_mb:.1f}MB in last 10s)")
                         last_file_size = current_size
                         last_output_time = time.time()
+                        
+                        # Estimate if conversion is nearly complete
+                        # For remux, output should be similar size to input video stream
+                        if input_file.exists():
+                            input_size = input_file.stat().st_size
+                            progress_pct = (current_size / input_size) * 100 if input_size > 0 else 0
+                            if progress_pct > 95:
+                                logger.info(f"📊 Conversion ~{progress_pct:.1f}% complete (estimated)")
                     else:
-                        logger.warning(f"⚠️ Output file size unchanged: {current_size / (1024**3):.2f}GB")
+                        if last_file_size > 0:
+                            logger.warning(f"⚠️ Output file size unchanged at {current_size / (1024**3):.2f}GB")
+                elif last_file_size == 0:
+                    logger.debug(f"📊 Waiting for output file to be created...")
                 last_size_check_time = time.time()
             
             # Check for timeout
