@@ -164,11 +164,15 @@ The previous approach was **deleting** partial files, preventing resume!
 
 ## Bottom Line
 
-✅ **State tracking works GREAT** - no re-uploading completed files
-❌ **FTP resume doesn't work** - each attempt starts fresh
-🐌 **Your FTP is very slow** - this is the real problem
-⏱️ **Time will help** - run workflow regularly, files will gradually complete
+✅ **State tracking works GREAT** - no re-uploading completed files  
+✅ **FTP resume NOW WORKS** - keeps partial files and resumes  
+🚀 **Your FTP is FAST** - it streams movies, optimized settings now match!  
+⏱️ **Much more efficient** - large files resume instead of restarting  
 📊 **Track progress** - download state file to see what's completed
 
-The "smart continuation" is working as designed for what's actually possible with your FTP setup. The workflow will keep trying, tracking progress, and eventually transfer everything it can.
+The "smart continuation" is now working at BOTH levels:
+1. **Within attempts**: Resume from partial downloads  
+2. **Between runs**: Skip completed files, retry failed ones
+
+Your streaming FTP + optimized settings = Much better success rate! 🎉
 
