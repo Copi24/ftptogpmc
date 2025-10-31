@@ -130,10 +130,10 @@ class FTPDownloader:
                         logger.info(f"📥 {progress_pct:.1f}% - {bytes_downloaded / (1024**3):.2f}/{remote_size / (1024**3):.2f}GB - {speed_mbps:.1f}MB/s - ETA {eta_seconds/60:.0f}m")
                         last_update = now
                 
-            # Retrieve file with longer timeout for large files
-            # Increase socket timeout during transfer
-            self.ftp.sock.settimeout(1800)  # 30 minutes for large file transfers
-            self.ftp.retrbinary(f'RETR {remote_path}', callback, blocksize=chunk_size)
+                # Retrieve file with longer timeout for large files
+                # Increase socket timeout during transfer
+                self.ftp.sock.settimeout(1800)  # 30 minutes for large file transfers
+                self.ftp.retrbinary(f'RETR {remote_path}', callback, blocksize=chunk_size)
                 
             # Verify download
             final_size = local_path.stat().st_size
