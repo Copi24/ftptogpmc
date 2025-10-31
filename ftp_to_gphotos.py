@@ -28,6 +28,12 @@ except ImportError:
     print("ERROR: state_manager.py not found")
     sys.exit(1)
 
+try:
+    from ftp_downloader import download_with_retry
+except ImportError:
+    print("ERROR: ftp_downloader.py not found")
+    sys.exit(1)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -40,10 +46,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-# Using direct FTP (no combine remote) for better reliability
-RCLONE_REMOTE = "Challenger"  # Direct FTP to Challenger server
-# Other direct servers available
-RCLONE_REMOTES = ["Challenger", "Tamarind", "Sputnik"]
+# Direct FTP server credentials
+FTP_SERVERS = {
+    "Challenger": {"host": "challenger.whatbox.ca", "port": 13017},
+    "Tamarind": {"host": "tamarind.whatbox.ca", "port": 13017},
+    "Sputnik": {"host": "sputnik.whatbox.ca", "port": 13017},
+}
+FTP_USER = "Lomusire"
+FTP_PASS = "NoSymbols"
+CURRENT_SERVER = "Challenger"  # Using Challenger (Blockbuster Movies)
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
 MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (with maximize-build-space we get ~60GB!)
 SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
@@ -485,30 +496,19 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     
     logger.info(f"✓ Disk space check: {free_space_gb:.1f}GB available, {required_space_gb:.1f}GB needed")
     
-    # Try download with aggressive retries (don't give up easily!)
-    max_download_attempts = 5  # More attempts for large streaming files
-    download_success = False
+    # Download using native Python FTP (much more reliable than rclone!)
+    server_info = FTP_SERVERS[CURRENT_SERVER]
+    logger.info(f"Using server: {CURRENT_SERVER} ({server_info['host']})")
     
-    for attempt in range(1, max_download_attempts + 1):
-        if attempt > 1:
-            wait_time = 60  # Fixed 60 second wait between attempts
-            logger.info(f"⏳ Waiting {wait_time}s before retry...")
-            time.sleep(wait_time)
-        
-        logger.info(f"🔄 Download attempt {attempt}/{max_download_attempts} for {file_name}")
-        download_success = stream_file_from_ftp(remote, remote_path, local_path, attempt=attempt)
-        
-        if download_success:
-            logger.info(f"✅ Download successful on attempt {attempt}!")
-            break
-        else:
-            logger.warning(f"❌ Download attempt {attempt}/{max_download_attempts} failed")
-            
-            if attempt < max_download_attempts:
-                logger.info(f"💪 Will retry (attempt {attempt + 1}/{max_download_attempts})...")
-            else:
-                logger.error(f"💔 All {max_download_attempts} download attempts exhausted")
-                logger.error(f"📝 File marked as FAILED - will retry on next workflow run")
+    download_success = download_with_retry(
+        host=server_info['host'],
+        user=FTP_USER,
+        password=FTP_PASS,
+        port=server_info['port'],
+        remote_path=remote_path,
+        local_path=local_path,
+        max_attempts=5
+    )
     
     if not download_success:
         error_msg = f"Failed to download after {max_download_attempts} attempts"
