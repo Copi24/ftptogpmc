@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 import os
 import shutil
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -196,53 +197,128 @@ def convert_iso_to_mkv(iso_path: Path, output_dir: Path) -> Path:
 
 
 def cleanup_mount_or_extract(extract_point: Path):
-    """Clean up mounted or extracted files."""
+    """Clean up mounted or extracted files. Must be aggressive to free disk space."""
     if not extract_point or not extract_point.exists():
         return
     
+    logger.info(f"🧹 Cleaning up: {extract_point}")
+    
+    # First, check if it's a mount point
+    is_mount = False
     try:
-        # Try unmount first (for mounted ISOs)
         result = subprocess.run(
-            ['sudo', 'umount', str(extract_point)],
+            ['mountpoint', '-q', str(extract_point)],
             capture_output=True,
-            text=True,
-            timeout=30
+            timeout=5
         )
-        if result.returncode == 0:
-            # Wait a bit for filesystem to sync
-            time.sleep(1)
+        is_mount = (result.returncode == 0)
+    except:
+        pass
+    
+    # If it's a mount point, unmount it first (CRITICAL!)
+    if is_mount:
+        logger.info(f"🔓 Unmounting: {extract_point}")
+        # Try normal unmount first
+        try:
+            result = subprocess.run(
+                ['sudo', 'umount', str(extract_point)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                logger.info(f"✓ Unmounted successfully")
+            else:
+                logger.warning(f"Normal unmount failed, trying force...")
+                # Force unmount if normal fails
+                subprocess.run(
+                    ['sudo', 'umount', '-f', str(extract_point)],
+                    capture_output=True,
+                    timeout=10,
+                    stderr=subprocess.DEVNULL
+                )
+        except Exception as e:
+            logger.warning(f"Unmount error: {e}, trying lazy unmount...")
+            # Last resort: lazy unmount
             try:
-                extract_point.rmdir()
-                logger.info(f"🗑️ Unmounted and cleaned up {extract_point}")
-            except OSError:
-                # Directory might not be empty yet, force unmount
-                subprocess.run(['sudo', 'umount', '-f', '-l', str(extract_point)], timeout=10, stderr=subprocess.DEVNULL)
-                time.sleep(1)
-                try:
-                    extract_point.rmdir()
-                    logger.info(f"🗑️ Force unmounted and cleaned up {extract_point}")
-                except:
-                    logger.warning(f"Could not remove mount point directory: {extract_point}")
-            return
-        else:
-            logger.warning(f"Unmount failed: {result.stderr[:200] if result.stderr else 'unknown error'}")
-            # Try lazy unmount
-            subprocess.run(['sudo', 'umount', '-l', str(extract_point)], timeout=10, stderr=subprocess.DEVNULL)
-            time.sleep(2)
-            try:
-                extract_point.rmdir()
-                logger.info(f"🗑️ Lazy unmounted and cleaned up {extract_point}")
-                return
+                subprocess.run(
+                    ['sudo', 'umount', '-l', str(extract_point)],
+                    capture_output=True,
+                    timeout=10,
+                    stderr=subprocess.DEVNULL
+                )
             except:
                 pass
-    except Exception as e:
-        logger.debug(f"Unmount attempt failed: {e}")
+        
+        # Wait for filesystem to sync after unmount
+        time.sleep(2)
+        
+        # Verify unmount worked
+        try:
+            result = subprocess.run(
+                ['mountpoint', '-q', str(extract_point)],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                logger.error(f"❌ Mount point still mounted! Force unmount failed")
+                # Try one more time with lazy unmount
+                subprocess.run(
+                    ['sudo', 'umount', '-l', str(extract_point)],
+                    capture_output=True,
+                    timeout=10,
+                    stderr=subprocess.DEVNULL
+                )
+                time.sleep(2)
+        except:
+            pass
     
-    # If mount failed, it's an extract directory - delete it
-    try:
-        if extract_point.is_dir():
-            shutil.rmtree(extract_point)
-            logger.info(f"🗑️ Cleaned up extracted directory {extract_point}")
-    except Exception as e:
-        logger.warning(f"Failed to cleanup {extract_point}: {e}")
+    # Now try to remove the directory
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            if extract_point.exists():
+                if extract_point.is_dir():
+                    # Check if directory is empty first
+                    try:
+                        if not any(extract_point.iterdir()):
+                            extract_point.rmdir()
+                            logger.info(f"🗑️ Removed empty directory: {extract_point}")
+                            return
+                        else:
+                            # Directory not empty - use rmtree
+                            shutil.rmtree(extract_point)
+                            logger.info(f"🗑️ Removed directory tree: {extract_point}")
+                            return
+                    except OSError:
+                        # Directory might still be busy, wait and retry
+                        if attempt < max_attempts - 1:
+                            time.sleep(2)
+                            continue
+                        else:
+                            logger.warning(f"⚠️ Directory still busy after {max_attempts} attempts: {extract_point}")
+                            # Force remove if it's an extracted directory
+                            try:
+                                shutil.rmtree(extract_point, ignore_errors=True)
+                            except:
+                                pass
+                else:
+                    extract_point.unlink()
+                    logger.info(f"🗑️ Removed file: {extract_point}")
+                    return
+            else:
+                logger.info(f"✓ Already cleaned up: {extract_point}")
+                return
+        except PermissionError:
+            logger.warning(f"⚠️ Permission denied removing {extract_point}, attempt {attempt + 1}/{max_attempts}")
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+        except Exception as e:
+            logger.error(f"❌ Failed to cleanup {extract_point}: {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+    
+    logger.error(f"❌ Could not fully cleanup {extract_point} after {max_attempts} attempts")
 
