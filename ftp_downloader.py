@@ -114,15 +114,12 @@ class FTPDownloader:
                 last_update = start_time
                 bytes_downloaded = resume_pos
                 
-                # Optimized callback - minimize overhead
-                callback_count = 0
                 def callback(data):
-                    nonlocal bytes_downloaded, last_update, callback_count
+                    nonlocal bytes_downloaded, last_update
                     f.write(data)
                     bytes_downloaded += len(data)
-                    callback_count += 1
                     
-                    # Progress update every 5 seconds (skip work most of the time)
+                    # Progress update every 5 seconds
                     now = time.time()
                     if now - last_update >= 5:
                         elapsed = now - start_time
@@ -133,8 +130,10 @@ class FTPDownloader:
                         logger.info(f"📥 {progress_pct:.1f}% - {bytes_downloaded / (1024**3):.2f}/{remote_size / (1024**3):.2f}GB - {speed_mbps:.1f}MB/s - ETA {eta_seconds/60:.0f}m")
                         last_update = now
                 
-                # Retrieve file
-                self.ftp.retrbinary(f'RETR {remote_path}', callback, blocksize=chunk_size)
+            # Retrieve file with longer timeout for large files
+            # Increase socket timeout during transfer
+            self.ftp.sock.settimeout(1800)  # 30 minutes for large file transfers
+            self.ftp.retrbinary(f'RETR {remote_path}', callback, blocksize=chunk_size)
                 
             # Verify download
             final_size = local_path.stat().st_size
@@ -148,7 +147,10 @@ class FTPDownloader:
                 return False
                 
         except Exception as e:
+            import traceback
             logger.error(f"Download failed: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return False
 
 
@@ -172,8 +174,7 @@ def download_with_retry(host: str, user: str, password: str, port: int,
                     time.sleep(wait_time)
                 continue
             
-            # Use larger chunks for better performance (8MB for streaming)
-            success = downloader.download_file(remote_path, local_path, chunk_size=8*1024*1024)  # 8MB chunks
+            success = downloader.download_file(remote_path, local_path, chunk_size=1024*1024)  # 1MB chunks
             downloader.disconnect()
             
             if success:
