@@ -466,9 +466,9 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     safe_name = "".join(c for c in file_name if c.isalnum() or c in "._- ")
     local_path = temp_dir / safe_name
     
-    # Check if already completed
+    # Check if already completed (redundant check, but keep for safety)
     if state.is_completed(remote_path):
-        logger.info(f"⏭️  Skipping {file_name} - already uploaded successfully")
+        logger.info(f"⏭️  Skipping {file_name} - already uploaded successfully (duplicate check)")
         return True
     
     # Check if should retry failed file
@@ -670,6 +670,16 @@ def main():
     state = StateManager()
     logger.info("📊 Loaded upload state")
     state.print_summary()
+    
+    # Log state file location for debugging
+    state_file_path = Path(state.state_file)
+    logger.info(f"📄 State file: {state_file_path.absolute()}")
+    logger.info(f"📄 State file exists: {state_file_path.exists()}")
+    if state_file_path.exists():
+        logger.info(f"📄 State file size: {state_file_path.stat().st_size} bytes")
+        logger.info(f"📄 Completed files count: {len(state.get_completed_files())}")
+        if len(state.get_completed_files()) > 0:
+            logger.info(f"📄 Sample completed files: {state.get_completed_files()[:3]}")
     
     # Create temporary directory
     # Use /workspace if available (GitHub Actions maximize-build-space mount point)
