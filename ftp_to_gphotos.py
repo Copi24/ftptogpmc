@@ -571,12 +571,26 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     # Check available disk space before downloading
     stat = shutil.disk_usage(temp_dir)
     free_space_gb = stat.free / (1024**3)
-    required_space_gb = file_info['size_gb'] + 2  # File size + 2GB buffer
+    
+    # For ISO files, we need extra space for:
+    # - ISO file itself
+    # - Mount point (read-only, but takes some space)
+    # - Output MKV (typically 15-30% smaller than ISO, but can be similar size)
+    # Add extra buffer for ISO processing
+    if is_iso:
+        # Worst case: ISO size + same size for MKV + 5GB buffer for mount/processing
+        required_space_gb = (file_info['size_gb'] * 2) + 5
+        logger.info(f"📀 ISO file detected - extra space needed for conversion")
+    else:
+        # Regular file: file size + 2GB buffer
+        required_space_gb = file_info['size_gb'] + 2
     
     if free_space_gb < required_space_gb:
         logger.error(f"❌ Insufficient disk space!")
         logger.error(f"   Available: {free_space_gb:.1f}GB")
         logger.error(f"   Required: {required_space_gb:.1f}GB")
+        if is_iso:
+            logger.error(f"   Note: ISO files need ~2x space (ISO + MKV output + mount buffer)")
         logger.error(f"   Skipping this file (too large for available space)")
         return False
     
