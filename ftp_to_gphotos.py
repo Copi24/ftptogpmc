@@ -78,7 +78,7 @@ def list_large_movie_files(remote: str, min_size: int, max_size: int, extensions
         ]
         
         logger.info(f"Running command: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         
         if result.returncode != 0:
             logger.error(f"rclone ls failed: {result.stderr}")
