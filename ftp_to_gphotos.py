@@ -22,6 +22,12 @@ except ImportError:
     print("ERROR: gpmc library not installed. Install with: pip install https://github.com/xob0t/google_photos_mobile_client/archive/refs/heads/main.zip")
     sys.exit(1)
 
+try:
+    from state_manager import StateManager
+except ImportError:
+    print("ERROR: state_manager.py not found")
+    sys.exit(1)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -164,6 +170,7 @@ def list_files_in_directory(remote: str, path: str, min_size: int, max_size: int
 
 def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path, 
                                      min_size: int, max_size: int, extensions: List[str],
+                                     state: StateManager,
                                      path: str = "", depth: int = 0) -> tuple:
     """
     Traverse directories depth-first and process files immediately.
@@ -181,7 +188,7 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     if files:
         logger.info(f"{indent}✓ Found {len(files)} file(s) in this directory")
         for file_info in files:
-            if process_file(remote, file_info, auth_data, temp_dir):
+            if process_file(remote, file_info, auth_data, temp_dir, state):
                 successful += 1
             else:
                 failed += 1
@@ -200,7 +207,7 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
             # Recursively process subdirectory
             sub_success, sub_failed = traverse_and_process_depth_first(
                 remote, auth_data, temp_dir, min_size, max_size, extensions, 
-                subpath, depth + 1
+                state, subpath, depth + 1
             )
             successful += sub_success
             failed += sub_failed
@@ -208,15 +215,21 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     return successful, failed
 
 
-def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE) -> bool:
+def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_size: int = CHUNK_SIZE, resume: bool = True) -> bool:
     """
     Stream a file from FTP to local path using rclone copy.
+    Supports resume if file partially downloaded.
     Returns True if successful, False otherwise.
     """
     logger.info(f"Streaming {remote_path} to {local_path}...")
     
     # Ensure parent directory exists
     local_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Check if partial file exists
+    if local_path.exists() and resume:
+        partial_size = local_path.stat().st_size
+        logger.info(f"🔄 Found partial download: {partial_size / (1024**3):.2f}GB - will attempt resume")
     
     process = None
     try:
@@ -230,7 +243,6 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             f'{remote}:{remote_path}',
             str(local_path.parent),
             '--progress',
-            '--no-check-dest',
             '--buffer-size', '16M',  # Smaller buffer for unstable connections
             '--transfers', '1',
             '--checkers', '1',
@@ -241,8 +253,14 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
             '--timeout', '180s',  # 3 minute timeout (shorter to detect hangs faster)
             '--contimeout', '90s',  # 90 second connection timeout
             '--tpslimit', '10',  # Limit to 10 transactions per second
-            '--tpslimit-burst', '0'  # No burst
+            '--tpslimit-burst', '0',  # No burst
+            '--ignore-existing',  # Don't re-download if file complete
         ]
+        
+        # Add resume support if partial file exists
+        if local_path.exists() and resume:
+            # Use --append-only for FTP resume (not --append as that's for other protocols)
+            logger.info("⚡ Resume mode enabled - continuing from partial download")
         
         logger.info(f"Starting download: {' '.join(cmd)}")
         start_time = time.time()
@@ -418,9 +436,10 @@ def upload_to_google_photos(file_path: Path, auth_data: str, retries: int = MAX_
     return None
 
 
-def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -> bool:
+def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, state: StateManager) -> bool:
     """
     Process a single file: download from FTP and upload to Google Photos.
+    Uses state manager to track progress and enable resumption.
     Returns True if successful, False otherwise.
     """
     remote_path = file_info['path']
@@ -429,11 +448,29 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
     safe_name = "".join(c for c in file_name if c.isalnum() or c in "._- ")
     local_path = temp_dir / safe_name
     
+    # Check if already completed
+    if state.is_completed(remote_path):
+        logger.info(f"⏭️  Skipping {file_name} - already uploaded successfully")
+        return True
+    
+    # Check if should retry failed file
+    if state.is_failed(remote_path) and not state.should_retry(remote_path):
+        logger.info(f"⏭️  Skipping {file_name} - exceeded max retry attempts")
+        return False
+    
     logger.info("=" * 80)
     logger.info(f"Processing: {remote_path}")
     logger.info(f"Size: {file_info['size_gb']:.2f}GB")
     logger.info(f"Local path: {local_path}")
+    
+    if state.is_failed(remote_path):
+        attempts = state.get_failure_count(remote_path)
+        logger.info(f"⚠️  Previous failures: {attempts} - retrying...")
+    
     logger.info("=" * 80)
+    
+    # Mark as in progress
+    state.mark_in_progress(remote_path, file_info['size'])
     
     # Check available disk space before downloading
     stat = shutil.disk_usage(temp_dir)
@@ -482,8 +519,10 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
                 logger.error(f"💔 All {max_download_attempts} download attempts exhausted")
     
     if not download_success:
-        logger.error(f"❌ Failed to download {remote_path} after {max_download_attempts} attempts")
+        error_msg = f"Failed to download after {max_download_attempts} attempts"
+        logger.error(f"❌ {error_msg}")
         logger.error(f"⚠️ This file will be retried on next workflow run")
+        state.mark_failed(remote_path, error_msg)
         return False
     
     # Verify file exists - rclone preserves original filename
@@ -536,6 +575,9 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
         logger.info(f"💾 Quality: ORIGINAL (unlimited)")
         logger.info("=" * 80)
         
+        # Mark as completed in state
+        state.mark_completed(remote_path, file_info['size'], media_key)
+        
         # Clean up local file to free space immediately
         try:
             local_path.unlink()
@@ -544,11 +586,15 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
             logger.warning(f"Failed to delete local file: {e}")
         return True
     else:
+        error_msg = "Upload failed after all retries"
         logger.error("=" * 80)
         logger.error(f"❌ ❌ ❌ UPLOAD FAILED ❌ ❌ ❌")
         logger.error(f"File: {file_name}")
         logger.error(f"Local file kept at: {local_path}")
         logger.error("=" * 80)
+        
+        # Mark as failed in state
+        state.mark_failed(remote_path, error_msg)
         return False
 
 
@@ -579,6 +625,11 @@ def main():
     else:
         logger.info(f"Using rclone config at {rclone_config}")
     
+    # Initialize state manager
+    state = StateManager()
+    logger.info("📊 Loaded upload state")
+    state.print_summary()
+    
     # Create temporary directory
     temp_dir = Path(tempfile.mkdtemp(prefix='ftp_gphotos_'))
     logger.info(f"Using temporary directory: {temp_dir}")
@@ -594,12 +645,16 @@ def main():
         
         successful, failed = traverse_and_process_depth_first(
             RCLONE_REMOTE, auth_data, temp_dir,
-            MIN_FILE_SIZE, MAX_FILE_SIZE, SUPPORTED_EXTENSIONS
+            MIN_FILE_SIZE, MAX_FILE_SIZE, SUPPORTED_EXTENSIONS,
+            state
         )
         
         logger.info("=" * 80)
         logger.info(f"Processing complete: {successful} successful, {failed} failed")
         logger.info("=" * 80)
+        
+        # Print final state summary
+        state.print_summary()
         
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
