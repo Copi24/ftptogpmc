@@ -305,47 +305,76 @@ def upload_to_google_photos(file_path: Path, auth_data: str, retries: int = MAX_
     Upload a file to Google Photos using gpmc.
     Returns the media key if successful, None otherwise.
     """
-    logger.info(f"Uploading {file_path.name} ({file_path.stat().st_size / (1024**3):.2f}GB) to Google Photos...")
+    file_size_gb = file_path.stat().st_size / (1024**3)
+    logger.info("=" * 80)
+    logger.info(f"🚀 STARTING UPLOAD TO GOOGLE PHOTOS")
+    logger.info(f"File: {file_path.name}")
+    logger.info(f"Size: {file_size_gb:.2f}GB")
+    logger.info(f"Settings: UNLIMITED STORAGE (use_quota=False, saver=False)")
+    logger.info("=" * 80)
     
     for attempt in range(1, retries + 1):
         try:
+            logger.info(f"📤 Upload attempt {attempt}/{retries} starting...")
+            
+            # Create client with auth data
             client = Client(auth_data=auth_data)
+            logger.info("✓ Client initialized successfully")
             
-            logger.info(f"Upload attempt {attempt}/{retries}")
             start_time = time.time()
+            logger.info(f"⏰ Upload started at {time.strftime('%H:%M:%S')}")
             
+            # Upload with unlimited storage settings
             result = client.upload(
                 target=str(file_path),
-                show_progress=True,
+                show_progress=True,  # This will show progress in console
                 threads=1,
                 force_upload=False,
-                use_quota=False,
-                saver=False
+                use_quota=False,  # ← UNLIMITED STORAGE
+                saver=False  # ← ORIGINAL QUALITY
             )
             
             elapsed = time.time() - start_time
             
+            logger.info(f"⏱️ Upload operation completed in {elapsed:.1f}s")
+            logger.info(f"📊 Result: {result}")
+            
             if result and str(file_path) in result:
                 media_key = result[str(file_path)]
                 speed = file_path.stat().st_size / elapsed / (1024**2) if elapsed > 0 else 0
-                logger.info(f"Upload successful! Media key: {media_key}")
-                logger.info(f"Upload completed in {elapsed:.1f}s ({speed:.2f}MB/s)")
+                
+                logger.info("=" * 80)
+                logger.info(f"✅ UPLOAD SUCCESSFUL!")
+                logger.info(f"📸 Media key: {media_key}")
+                logger.info(f"⚡ Speed: {speed:.2f}MB/s")
+                logger.info(f"⏱️ Time: {elapsed:.1f}s")
+                logger.info(f"💾 Storage: UNLIMITED (original quality)")
+                logger.info(f"🔗 File should now be visible in Google Photos!")
+                logger.info("=" * 80)
                 return media_key
             else:
-                logger.warning(f"Upload returned unexpected result: {result}")
+                logger.error(f"❌ Upload returned unexpected result: {result}")
                 if attempt < retries:
-                    logger.info(f"Retrying in {RETRY_DELAY} seconds...")
+                    logger.info(f"⏳ Retrying in {RETRY_DELAY} seconds...")
                     time.sleep(RETRY_DELAY)
                     continue
                 
         except Exception as e:
-            logger.error(f"Upload attempt {attempt} failed: {e}")
+            logger.error(f"❌ Upload attempt {attempt} failed with exception:")
+            logger.error(f"   Error: {str(e)}")
+            logger.error(f"   Type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            
             if attempt < retries:
-                logger.info(f"Retrying in {RETRY_DELAY} seconds...")
+                logger.info(f"⏳ Retrying in {RETRY_DELAY} seconds...")
                 time.sleep(RETRY_DELAY)
             else:
-                logger.error(f"All upload attempts failed for {file_path.name}")
+                logger.error(f"💔 All {retries} upload attempts failed for {file_path.name}")
     
+    logger.error("=" * 80)
+    logger.error(f"❌ UPLOAD FAILED COMPLETELY")
+    logger.error("=" * 80)
     return None
 
 
@@ -422,21 +451,35 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path) -
         logger.info(f"File size verified: {actual_size / (1024**3):.2f}GB")
     
     # Upload to Google Photos
+    logger.info("=" * 80)
+    logger.info(f"📤 Preparing to upload to Google Photos")
+    logger.info(f"File verified and ready: {local_path.name}")
+    logger.info("=" * 80)
+    
     media_key = upload_to_google_photos(local_path, auth_data)
     
     if media_key:
-        logger.info(f"Successfully processed {file_name} -> {media_key}")
+        logger.info("=" * 80)
+        logger.info(f"✅ ✅ ✅ COMPLETE SUCCESS! ✅ ✅ ✅")
+        logger.info(f"📁 File: {file_name}")
+        logger.info(f"🔑 Media Key: {media_key}")
+        logger.info(f"📸 Status: NOW IN GOOGLE PHOTOS")
+        logger.info(f"💾 Quality: ORIGINAL (unlimited)")
+        logger.info("=" * 80)
+        
         # Clean up local file to free space immediately
         try:
             local_path.unlink()
-            logger.info(f"Deleted local file: {local_path}")
+            logger.info(f"🗑️ Deleted local file: {local_path}")
         except Exception as e:
             logger.warning(f"Failed to delete local file: {e}")
         return True
     else:
-        logger.error(f"Failed to upload {file_name}")
-        # Keep file for manual retry if needed (but warn about disk space)
-        logger.warning(f"Local file kept at {local_path} for manual retry")
+        logger.error("=" * 80)
+        logger.error(f"❌ ❌ ❌ UPLOAD FAILED ❌ ❌ ❌")
+        logger.error(f"File: {file_name}")
+        logger.error(f"Local file kept at: {local_path}")
+        logger.error("=" * 80)
         return False
 
 
