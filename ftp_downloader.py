@@ -107,7 +107,15 @@ class FTPDownloader:
             with open(local_path, mode) as f:
                 # Send REST command to resume from position
                 if resume_pos > 0:
-                    self.ftp.voidcmd(f'REST {resume_pos}')
+                    try:
+                        response = self.ftp.sendcmd(f'REST {resume_pos}')
+                        logger.info(f"REST response: {response}")
+                        # 350 response means server accepted the restart position
+                        if not response.startswith('350'):
+                            logger.warning(f"Unexpected REST response: {response}")
+                    except Exception as e:
+                        logger.error(f"REST command failed: {e}")
+                        return False
                 
                 # Start transfer
                 start_time = time.time()
