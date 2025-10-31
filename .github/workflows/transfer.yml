@@ -52,7 +52,6 @@ jobs:
       - name: Run transfer script
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
-          RCLONE_CONFIG: ~/.config/rclone/rclone.conf
         run: |
           python3 ftp_to_gphotos.py
         continue-on-error: true

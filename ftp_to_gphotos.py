@@ -358,10 +358,12 @@ def main():
         sys.exit(1)
     
     # Check rclone config
-    rclone_config = os.environ.get('RCLONE_CONFIG', os.path.expanduser('~/.config/rclone/rclone.conf'))
+    rclone_config = os.path.expanduser('~/.config/rclone/rclone.conf')
     if not os.path.exists(rclone_config):
         logger.warning(f"rclone config not found at {rclone_config}")
-        logger.info("Will use rclone config from current directory or default location")
+        logger.info("Rclone will use default config location or environment")
+    else:
+        logger.info(f"Using rclone config at {rclone_config}")
     
     # Create temporary directory
     temp_dir = Path(tempfile.mkdtemp(prefix='ftp_gphotos_'))
