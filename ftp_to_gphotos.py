@@ -696,11 +696,21 @@ def main():
     state_file_path = Path(state.state_file)
     logger.info(f"📄 State file: {state_file_path.absolute()}")
     logger.info(f"📄 State file exists: {state_file_path.exists()}")
-    if state_file_path.exists():
+    
+    if not state_file_path.exists():
+        logger.warning("⚠️  State file does not exist! This means:")
+        logger.warning("   1. First run (no previous artifact)")
+        logger.warning("   2. Previous artifact wasn't uploaded")
+        logger.warning("   3. Artifact download failed silently")
+        logger.warning("   → All files will be processed from scratch")
+        logger.warning("   → State will be created and saved after each file")
+    else:
         logger.info(f"📄 State file size: {state_file_path.stat().st_size} bytes")
         logger.info(f"📄 Completed files count: {len(state.get_completed_files())}")
         if len(state.get_completed_files()) > 0:
             logger.info(f"📄 Sample completed files: {state.get_completed_files()[:3]}")
+        else:
+            logger.warning("⚠️  State file exists but is empty (0 completed files)")
     
     # Create temporary directory
     # Use /workspace if available (GitHub Actions maximize-build-space mount point)
