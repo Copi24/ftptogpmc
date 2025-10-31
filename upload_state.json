@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2025-10-31T19:08:35.851000",
+  "last_updated": "2025-10-31T19:40:14.779000",
   "completed": [
     "Blockbuster Movies/009 Re-Cyborg (2012)/009_RE_CYBORG_HSBS_1080p_hevc.mkv",
     "Blockbuster Movies/009 Re-Cyborg (2012)/009_RE_CYBORG_FSBS_4k_hevc.mkv",
@@ -48,7 +48,8 @@
     "Blockbuster Movies/Abominable (2019)/Abominable.2019.3D.BluRay.Half-SBS.x.TrueHD.7.1.Atmos-FGT_1080p_hevc.mkv",
     "Blockbuster Movies/Abraham Lincoln - Vampire Hunter (2012)/Abraham_Lincoln_Vampire_Hunter_3D_2012_HOU_1080p_hevc.mkv",
     "Blockbuster Movies/Alice - Through the Looking Glass (2016)/Alice.Through.the.Looking.Glass.2016.3D.BluRay.Half-SBS.x.DTS-HD.MA.7.1-FGT_1080p_hevc.mkv",
-    "Blockbuster Movies/Alice in Wonderland (2010)/VR-SBS_3840x_Alice_in_Wonderland_2010_4k_hevc.mkv"
+    "Blockbuster Movies/Alice in Wonderland (2010)/VR-SBS_3840x_Alice_in_Wonderland_2010_4k_hevc.mkv",
+    "Blockbuster Movies/Alien Vs Predator (2004)/Alien Vs Predator 2004 Unrated Edition Full_SBS 3Dconv NeFud.mkv"
   ],
   "failed": {
     "Blockbuster Movies/407 Dark Flight 3D (2012)/Dark_Flight_3D_Blu_Ray_2012.iso": {
@@ -73,8 +74,8 @@
   "in_progress": null,
   "skipped": [],
   "stats": {
-    "total_uploaded": 47,
+    "total_uploaded": 48,
     "total_failed": 3,
-    "total_bytes": 524000000000
+    "total_bytes": 540000000000
   }
 }
