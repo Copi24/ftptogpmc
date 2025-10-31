@@ -631,8 +631,16 @@ def main():
     state.print_summary()
     
     # Create temporary directory
-    temp_dir = Path(tempfile.mkdtemp(prefix='ftp_gphotos_'))
-    logger.info(f"Using temporary directory: {temp_dir}")
+    # Use /workspace if available (GitHub Actions maximize-build-space mount point)
+    # Otherwise fall back to /tmp
+    workspace_dir = Path('/workspace')
+    if workspace_dir.exists() and workspace_dir.is_dir():
+        temp_dir = workspace_dir / 'ftp_gphotos_temp'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using workspace directory: {temp_dir} (large disk space)")
+    else:
+        temp_dir = Path(tempfile.mkdtemp(prefix='ftp_gphotos_'))
+        logger.info(f"Using temporary directory: {temp_dir}")
     
     try:
         # Traverse and process files depth-first
