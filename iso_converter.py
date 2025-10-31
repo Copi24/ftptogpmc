@@ -201,19 +201,42 @@ def cleanup_mount_or_extract(extract_point: Path):
         return
     
     try:
-        # Try unmount first
+        # Try unmount first (for mounted ISOs)
         result = subprocess.run(
             ['sudo', 'umount', str(extract_point)],
             capture_output=True,
-            timeout=30,
-            stderr=subprocess.DEVNULL
+            text=True,
+            timeout=30
         )
         if result.returncode == 0:
-            extract_point.rmdir()
-            logger.info(f"🗑️ Unmounted and cleaned up {extract_point}")
+            # Wait a bit for filesystem to sync
+            time.sleep(1)
+            try:
+                extract_point.rmdir()
+                logger.info(f"🗑️ Unmounted and cleaned up {extract_point}")
+            except OSError:
+                # Directory might not be empty yet, force unmount
+                subprocess.run(['sudo', 'umount', '-f', '-l', str(extract_point)], timeout=10, stderr=subprocess.DEVNULL)
+                time.sleep(1)
+                try:
+                    extract_point.rmdir()
+                    logger.info(f"🗑️ Force unmounted and cleaned up {extract_point}")
+                except:
+                    logger.warning(f"Could not remove mount point directory: {extract_point}")
             return
-    except:
-        pass
+        else:
+            logger.warning(f"Unmount failed: {result.stderr[:200] if result.stderr else 'unknown error'}")
+            # Try lazy unmount
+            subprocess.run(['sudo', 'umount', '-l', str(extract_point)], timeout=10, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+            try:
+                extract_point.rmdir()
+                logger.info(f"🗑️ Lazy unmounted and cleaned up {extract_point}")
+                return
+            except:
+                pass
+    except Exception as e:
+        logger.debug(f"Unmount attempt failed: {e}")
     
     # If mount failed, it's an extract directory - delete it
     try:

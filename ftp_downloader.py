@@ -106,22 +106,20 @@ class FTPDownloader:
         try:
             with open(local_path, mode) as f:
                 # Send REST command to resume from position
-                # 350 is intermediate response (pending) - means "accepted, send RETR now"
+                # 350 is intermediate response (pending) - means "send RETR now"
                 if resume_pos > 0:
                     try:
-                        # Send REST command manually to handle 350 intermediate response
+                        # Use putcmd/getresp to handle 350 intermediate response
                         self.ftp.putcmd(f'REST {resume_pos}')
-                        # Read response - 350 is expected (intermediate)
-                        response = self.ftp.getresp()
-                        logger.info(f"REST response: {response}")
-                        # 350 means "pending" - server accepted, waiting for RETR
-                        # This is correct, proceed with RETR
-                        if response[0] == '3':  # 3xx is intermediate (350)
-                            logger.info("✓ REST accepted (350) - server ready for RETR")
-                        elif response[0] == '2':  # 2xx is final success
+                        code, msg = self.ftp.getresp()
+                        logger.info(f"REST response: {code} {msg}")
+                        # 350 means "pending - send RETR" - this is CORRECT, continue
+                        if code == '350':
+                            logger.info("✓ REST accepted (350) - server waiting for RETR command")
+                        elif code.startswith('2'):
                             logger.info("✓ REST accepted")
                         else:
-                            logger.error(f"Unexpected REST response: {response}")
+                            logger.error(f"Unexpected REST response: {code} {msg}")
                             return False
                     except Exception as e:
                         logger.error(f"REST command failed: {e}")
