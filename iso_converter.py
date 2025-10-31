@@ -12,7 +12,7 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
-def find_main_video_in_iso(iso_path: Path) -> Path:
+def find_main_video_in_iso(iso_path: Path) -> tuple:
     """
     Mount or extract ISO and find the main video file.
     Returns path to the largest video stream (usually the main movie).
