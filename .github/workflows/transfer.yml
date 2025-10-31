@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Maximize build disk space
         uses: easimon/maximize-build-space@master
+        timeout-minutes: 10  # Kill if takes longer than 10 minutes
+        continue-on-error: true  # Continue even if this fails
         with:
           root-reserve-mb: 2048        # Keep 2GB for system
           swap-size-mb: 1024           # 1GB swap
