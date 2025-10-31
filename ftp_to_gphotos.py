@@ -684,8 +684,12 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
         logger.info("💾 State saved after successful upload")
         
         # Try to upload state as artifact using gh CLI (for persistence if workflow times out)
-        # This is a best-effort attempt - won't fail if it doesn't work
-        upload_state_artifact(state.state_file)
+        # This ensures state persists even if workflow times out or is cancelled
+        # Best-effort - won't fail script if it doesn't work
+        if upload_state_artifact(state.state_file):
+            logger.info("✅ State uploaded to GitHub Actions artifact (will persist across runs)")
+        else:
+            logger.debug("State saved locally - workflow will upload at end")
         
         # Clean up local file to free space immediately
         try:
