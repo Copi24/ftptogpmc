@@ -86,11 +86,14 @@ def list_directories(remote: str, path: str = "") -> List[str]:
         for line in result.stdout.strip().split('\n'):
             if not line.strip():
                 continue
-            # lsd output format: size date time name
+            # lsd output format: size date time size name
+            # Example: "          -1 2025-10-31 10:33:09        -1 Challenger"
             parts = line.split()
-            if len(parts) >= 4:
-                dir_name = ' '.join(parts[3:])  # Handle names with spaces
+            if len(parts) >= 5:
+                # Skip first 4 columns: size, date, time, size
+                dir_name = ' '.join(parts[4:])  # Handle names with spaces
                 dirs.append(dir_name)
+                logger.debug(f"Found directory: {dir_name}")
         
         return dirs
         
@@ -162,7 +165,8 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     Returns (successful_count, failed_count).
     """
     indent = "  " * depth
-    logger.info(f"{indent}📁 Scanning: {path if path else '/' }")
+    display_path = path if path else '(root)'
+    logger.info(f"{indent}📁 Scanning: {display_path}")
     
     successful = 0
     failed = 0
@@ -170,7 +174,7 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     # Process files in current directory
     files = list_files_in_directory(remote, path, min_size, max_size, extensions)
     if files:
-        logger.info(f"{indent}Found {len(files)} file(s) in this directory")
+        logger.info(f"{indent}✓ Found {len(files)} file(s) in this directory")
         for file_info in files:
             if process_file(remote, file_info, auth_data, temp_dir):
                 successful += 1
@@ -180,9 +184,14 @@ def traverse_and_process_depth_first(remote: str, auth_data: str, temp_dir: Path
     # Get subdirectories
     subdirs = list_directories(remote, path)
     if subdirs:
-        logger.info(f"{indent}Found {len(subdirs)} subdirectory(ies)")
+        logger.info(f"{indent}↳ Found {len(subdirs)} subdirectory(ies): {', '.join(subdirs)}")
         for subdir in subdirs:
-            subpath = os.path.join(path, subdir) if path else subdir
+            # Use forward slashes for paths (rclone standard)
+            if path:
+                subpath = f"{path}/{subdir}"
+            else:
+                subpath = subdir
+            
             # Recursively process subdirectory
             sub_success, sub_failed = traverse_and_process_depth_first(
                 remote, auth_data, temp_dir, min_size, max_size, extensions, 
