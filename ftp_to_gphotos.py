@@ -38,7 +38,7 @@ RCLONE_REMOTE = "3DFF"
 # Try individual servers if combined fails
 RCLONE_REMOTES = ["3DFlickFix", "3DFlickFix2", "3DFlickFix3"]
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
-MAX_FILE_SIZE = 35 * 1024 * 1024 * 1024  # 35GB maximum (GitHub Actions ~14GB + 30GB freed = 44GB)
+MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (with maximize-build-space we get ~60GB!)
 SUPPORTED_EXTENSIONS = ['.mkv', '.iso', '.mp4', '.m4v', '.avi', '.m2ts']
 CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for streaming
 MAX_RETRIES = 3
