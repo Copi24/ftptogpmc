@@ -41,16 +41,32 @@ except ImportError:
     print("ERROR: iso_converter.py not found")
     sys.exit(1)
 
-# Configure logging
+# Configure logging with immediate flushing (critical for GitHub Actions)
+# Create custom handlers that flush immediately after each log
+class FlushingStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+class FlushingFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+stream_handler = FlushingStreamHandler(sys.stdout)
+file_handler = FlushingFileHandler('ftp_to_gphotos.log')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('ftp_to_gphotos.log')
-    ]
+    handlers=[stream_handler, file_handler],
+    force=True  # Override any existing logging config
 )
 logger = logging.getLogger(__name__)
+
+# Ensure unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
 # Configuration
 # Direct FTP server credentials
