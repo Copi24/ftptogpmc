@@ -651,8 +651,78 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
             free_space_gb = stat.free / (1024**3)
             logger.info(f"💾 Disk space after cleanup: {free_space_gb:.2f}GB available")
         else:
-            logger.error("❌ Failed to convert ISO to MKV")
-            download_success = False
+            logger.error("❌ ISO conversion failed - skipping upload")
+            # Mark as failed
+            state.mark_failed(remote_path, "ISO conversion failed")
+            return False
+    
+    # If M2TS file, convert to MKV before upload (Google Photos doesn't accept .m2ts)
+    if download_success and is_m2ts:
+        logger.info("=" * 80)
+        logger.info(f"📀 M2TS file downloaded - converting to MKV...")
+        logger.info("=" * 80)
+        
+        # Create output MKV filename
+        mkv_path = local_path.with_suffix('.mkv')
+        
+        logger.info(f"🎬 Remuxing {local_path.name} to MKV (no re-encode - ultra fast!)...")
+        
+        # Use ffmpeg to remux M2TS to MKV (copy codecs, no re-encoding)
+        cmd = [
+            'ffmpeg',
+            '-i', str(local_path),
+            '-c', 'copy',  # Copy codecs (no re-encoding!)
+            '-map', '0',  # Map all streams
+            '-y',  # Overwrite output
+            str(mkv_path)
+        ]
+        
+        try:
+            logger.info(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=3600  # 1 hour max for remux
+            )
+            
+            if result.returncode == 0 and mkv_path.exists() and mkv_path.stat().st_size > 0:
+                logger.info(f"✅ Conversion complete: {mkv_path.name}")
+                
+                # Delete original M2TS file to free space (CRITICAL!)
+                try:
+                    m2ts_size = local_path.stat().st_size / (1024**3)
+                    local_path.unlink()
+                    logger.info(f"🗑️ Deleted M2TS file ({m2ts_size:.2f}GB) to free space")
+                except Exception as e:
+                    logger.error(f"❌ Failed to delete M2TS file: {e}")
+                
+                # Use MKV file for upload
+                local_path = mkv_path
+                file_info['size'] = mkv_path.stat().st_size
+                file_info['size_gb'] = file_info['size'] / (1024**3)
+                logger.info(f"📊 New file size: {file_info['size_gb']:.2f}GB")
+                
+                # Verify disk space was freed
+                stat = shutil.disk_usage(temp_dir)
+                free_space_gb = stat.free / (1024**3)
+                logger.info(f"💾 Disk space after cleanup: {free_space_gb:.1f}GB available")
+            else:
+                logger.error(f"❌ M2TS conversion failed (return code: {result.returncode})")
+                if result.stdout:
+                    logger.error(f"ffmpeg output: {result.stdout[-500:]}")  # Last 500 chars
+                # Mark as failed
+                state.mark_failed(remote_path, "M2TS conversion failed")
+                return False
+        except subprocess.TimeoutExpired:
+            logger.error("❌ M2TS conversion timed out after 1 hour")
+            state.mark_failed(remote_path, "M2TS conversion timed out")
+            return False
+        except Exception as e:
+            logger.error(f"❌ M2TS conversion error: {e}")
+            state.mark_failed(remote_path, f"M2TS conversion error: {e}")
+            return False
     
     if not download_success:
         error_msg = f"Failed to download after 5 attempts"
