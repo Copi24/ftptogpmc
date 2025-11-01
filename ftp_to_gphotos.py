@@ -553,6 +553,8 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     
     # Handle ISO files - convert to MKV first
     is_iso = remote_path.lower().endswith('.iso')
+    # Handle M2TS files - convert to MKV (Google Photos doesn't accept .m2ts)
+    is_m2ts = remote_path.lower().endswith('.m2ts')
     
     logger.info("=" * 80)
     logger.info(f"Processing: {remote_path}")
