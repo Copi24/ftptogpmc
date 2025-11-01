@@ -42,10 +42,19 @@ except ImportError:
     sys.exit(1)
 
 # Configure logging with immediate flushing (critical for GitHub Actions)
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.flush = lambda: sys.stdout.flush()  # Force immediate flush
-file_handler = logging.FileHandler('ftp_to_gphotos.log')
-file_handler.flush = lambda: file_handler.stream.flush()  # Force immediate flush
+# Create custom handlers that flush immediately after each log
+class FlushingStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+class FlushingFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+stream_handler = FlushingStreamHandler(sys.stdout)
+file_handler = FlushingFileHandler('ftp_to_gphotos.log')
 
 logging.basicConfig(
     level=logging.INFO,

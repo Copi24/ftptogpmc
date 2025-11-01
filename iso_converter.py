@@ -266,10 +266,10 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         # Wait for threads and collect remaining output
         stdout_thread.join(timeout=10)
         if stdout_thread.is_alive():
-            logger.warning("⚠️ stdout thread still alive after 10s timeout")
+            logger.warning("⚠️ stdout thread still alive after 10s timeout (will be cleaned up as daemon)")
         stderr_thread.join(timeout=10)
         if stderr_thread.is_alive():
-            logger.warning("⚠️ stderr thread still alive after 10s timeout")
+            logger.warning("⚠️ stderr thread still alive after 10s timeout (will be cleaned up as daemon)")
         
         # Collect remaining output
         logger.info("Collecting remaining ffmpeg output...")
