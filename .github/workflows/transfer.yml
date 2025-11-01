@@ -71,30 +71,52 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd repo
-          echo "🔍 Looking for previous upload state artifact..."
+          echo "🔍 Looking for previous upload state..."
           
-          # Get the most recent completed workflow run (excluding the current run)
+          STATE_FOUND=false
+          
+          # Priority 1: Try to download artifact from previous workflow run (most recent state)
           CURRENT_RUN_ID=${{ github.run_id }}
           LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=5 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[0].databaseId")
           
-          if [ -z "$LATEST_RUN" ] || [ "$LATEST_RUN" = "null" ]; then
-            echo "⚠️ No previous workflow runs found"
-            exit 0
-          fi
-          
-          echo "📥 Found workflow run: $LATEST_RUN"
-          
-          # Try to download the upload-state artifact from that run
-          if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
-            echo "✅ Successfully downloaded upload-state artifact"
-            # The artifact might be in the current directory or a subdirectory
-            if [ -f "upload_state.json" ]; then
-              echo "📄 State file size: $(wc -c < upload_state.json) bytes"
+          if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
+            echo "📥 Found workflow run: $LATEST_RUN"
+            echo "🔍 Attempting to download upload-state artifact..."
+            
+            # Try to download the upload-state artifact from that run
+            if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
+              echo "✅ Successfully downloaded upload-state artifact"
+              # The artifact might be in the current directory or a subdirectory
+              if [ -f "upload_state.json" ]; then
+                echo "📄 Artifact state file size: $(wc -c < upload_state.json) bytes"
+                STATE_FOUND=true
+              else
+                # Try to find it in subdirectories
+                FOUND_FILE=$(find . -name "upload_state.json" -type f -print -quit 2>/dev/null)
+                if [ -n "$FOUND_FILE" ]; then
+                  mv "$FOUND_FILE" ./upload_state.json
+                  echo "📄 Found artifact state file: $(wc -c < upload_state.json) bytes"
+                  STATE_FOUND=true
+                else
+                  echo "⚠️ upload_state.json not found in artifact"
+                fi
+              fi
             else
-              find . -name "upload_state.json" -exec mv {} ./upload_state.json \; -quit 2>/dev/null || echo "⚠️ upload_state.json not found in artifact"
+              echo "⚠️ No upload-state artifact found in previous run"
             fi
           else
-            echo "⚠️ No upload-state artifact found in previous run"
+            echo "⚠️ No previous workflow runs found"
+          fi
+          
+          # Priority 2: Fallback to state file in repo (if committed)
+          if [ "$STATE_FOUND" = "false" ] && [ -f "upload_state.json" ]; then
+            echo "✅ Found state file in repository (fallback)"
+            echo "📄 Repo state file size: $(wc -c < upload_state.json) bytes"
+            STATE_FOUND=true
+          fi
+          
+          if [ "$STATE_FOUND" = "false" ]; then
+            echo "ℹ️ No previous state found - will create new state on first run"
           fi
       
       - name: Check state file
