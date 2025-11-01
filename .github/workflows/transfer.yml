@@ -102,8 +102,15 @@ jobs:
               
               # Check if upload_state.json exists in the extracted directory
               if [ -f "$RUN_DIR/upload_state.json" ]; then
-                # Count completed files in this state
-                FILE_COUNT=$(jq -r '.completed | length' "$RUN_DIR/upload_state.json" 2>/dev/null || echo "0")
+                # Count completed files in this state with validation
+                FILE_COUNT=$(jq -r '.completed | length' "$RUN_DIR/upload_state.json" 2>/dev/null)
+                
+                # Validate that FILE_COUNT is a valid number
+                if ! [[ "$FILE_COUNT" =~ ^[0-9]+$ ]]; then
+                  echo "  ⚠️ Invalid or malformed state file (non-numeric count), treating as 0"
+                  FILE_COUNT=0
+                fi
+                
                 echo "  📊 Run $RUN_ID has $FILE_COUNT completed files"
                 
                 # Keep track of the best (most complete) artifact
