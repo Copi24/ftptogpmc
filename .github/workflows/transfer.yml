@@ -3,11 +3,11 @@ name: FTP to Google Photos Transfer
 on:
   workflow_dispatch:
   schedule:
-    # Run every 6.5 hours to continue processing (workflow timeout is 6h)
+    # Run every ~6.5 hours to continue processing (workflow timeout is 6h)
     # This ensures continuous processing across multiple runs
-    # Pattern: Run at 00:00, 06:30, 13:00, 19:30 (every 6.5 hours)
-    - cron: '0 0,6,12,18 * * *'      # Every 6 hours at :00
-    - cron: '30 6,12,18 * * *'       # Every 6.5 hours offset (at :30)
+    # Pattern: Alternating 6h and 7h intervals for ~6.5h average
+    # Runs at: 00:00, 06:00, 13:00, 19:00 (6h, 7h, 6h, 7h = ~6.5h average)
+    - cron: '0 0,6,13,19 * * *'
   push:
     branches:
       - main
