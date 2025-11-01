@@ -75,94 +75,87 @@ jobs:
           
           STATE_FOUND=false
           
-          # SKIP ARTIFACT DOWNLOAD - Use repo state for this run
-          # This ensures we use the committed state file
-          echo "ℹ️ Skipping artifact download - will use repo state file if available"
+          # Priority 1: Try to download artifact from previous workflow run (most recent state)
+          CURRENT_RUN_ID=${{ github.run_id }}
+          LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=5 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[0].databaseId")
           
-          # Priority 1: Use state file from repo (if committed)
-          if [ -f "upload_state.json" ]; then
-            echo "✅ Found state file in repository"
-            echo "📄 Repo state file size: $(wc -c < upload_state.json) bytes"
-            STATE_FOUND=true
-          else
-            echo "⚠️ No state file in repository"
+          if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
+            echo "📥 Found workflow run: $LATEST_RUN"
+            echo "🔍 Attempting to download upload-state artifact..."
             
-            # Priority 2: Fallback - Try to download artifact from previous workflow run
-            # (Only if repo state doesn't exist)
-            CURRENT_RUN_ID=${{ github.run_id }}
-            LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=5 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[0].databaseId")
+            # Create temp directory for artifact extraction
+            ARTIFACT_TEMP=$(mktemp -d)
             
-            if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
-              echo "📥 Found workflow run: $LATEST_RUN"
-              echo "🔍 Attempting to download upload-state artifact as fallback..."
+            # Try to download the upload-state artifact from that run
+            if gh run download $LATEST_RUN --name upload-state --dir "$ARTIFACT_TEMP" 2>/dev/null; then
+              echo "✅ Successfully downloaded upload-state artifact"
               
-              # Create temp directory for artifact extraction
-              ARTIFACT_TEMP=$(mktemp -d)
+              # Artifacts are ZIP files - need to extract them
+              # Find any zip files in the temp directory
+              ZIP_FILE=$(find "$ARTIFACT_TEMP" -name "*.zip" -type f -print -quit 2>/dev/null)
               
-              # Try to download the upload-state artifact from that run
-              if gh run download $LATEST_RUN --name upload-state --dir "$ARTIFACT_TEMP" 2>/dev/null; then
-                echo "✅ Successfully downloaded upload-state artifact"
+              if [ -n "$ZIP_FILE" ]; then
+                echo "📦 Found artifact ZIP: $ZIP_FILE"
+                echo "📂 Extracting ZIP file..."
                 
-                # Artifacts are ZIP files - need to extract them
-                # Find any zip files in the temp directory
-                ZIP_FILE=$(find "$ARTIFACT_TEMP" -name "*.zip" -type f -print -quit 2>/dev/null)
-                
-                if [ -n "$ZIP_FILE" ]; then
-                  echo "📦 Found artifact ZIP: $ZIP_FILE"
-                  echo "📂 Extracting ZIP file..."
+                # Extract ZIP file (unzip should be available in Ubuntu runner)
+                if unzip -q "$ZIP_FILE" -d "$ARTIFACT_TEMP" 2>/dev/null; then
+                  echo "✅ ZIP extracted successfully"
                   
-                  # Extract ZIP file (unzip should be available in Ubuntu runner)
-                  if unzip -q "$ZIP_FILE" -d "$ARTIFACT_TEMP" 2>/dev/null; then
-                    echo "✅ ZIP extracted successfully"
-                    
-                    # Look for upload_state.json in extracted contents
-                    EXTRACTED_FILE=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
-                    
-                    if [ -n "$EXTRACTED_FILE" ]; then
-                      # Copy extracted JSON to repo directory
-                      cp "$EXTRACTED_FILE" ./upload_state.json
-                      echo "📄 Artifact state file extracted: $(wc -c < upload_state.json) bytes"
-                      STATE_FOUND=true
-                    else
-                      echo "⚠️ upload_state.json not found in extracted ZIP"
-                      echo "📂 Listing extracted files:"
-                      find "$ARTIFACT_TEMP" -type f | head -20 || true
-                    fi
-                  else
-                    echo "⚠️ Failed to extract ZIP file (unzip may not be installed)"
-                    # Try installing unzip if not available
-                    sudo apt-get update && sudo apt-get install -y unzip || true
-                    if unzip -q "$ZIP_FILE" -d "$ARTIFACT_TEMP" 2>/dev/null; then
-                      EXTRACTED_FILE=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
-                      if [ -n "$EXTRACTED_FILE" ]; then
-                        cp "$EXTRACTED_FILE" ./upload_state.json
-                        echo "📄 Artifact state file extracted (after installing unzip): $(wc -c < upload_state.json) bytes"
-                        STATE_FOUND=true
-                      fi
-                    fi
-                  fi
-                else
-                  # Try to find JSON file directly (in case artifact isn't zipped)
-                  DIRECT_JSON=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
-                  if [ -n "$DIRECT_JSON" ]; then
-                    cp "$DIRECT_JSON" ./upload_state.json
-                    echo "📄 Found artifact state file directly: $(wc -c < upload_state.json) bytes"
+                  # Look for upload_state.json in extracted contents
+                  EXTRACTED_FILE=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
+                  
+                  if [ -n "$EXTRACTED_FILE" ]; then
+                    # Copy extracted JSON to repo directory
+                    cp "$EXTRACTED_FILE" ./upload_state.json
+                    echo "📄 Artifact state file extracted: $(wc -c < upload_state.json) bytes"
                     STATE_FOUND=true
                   else
-                    echo "⚠️ No ZIP or JSON file found in artifact"
-                    echo "📂 Listing artifact directory:"
-                    ls -la "$ARTIFACT_TEMP" || true
+                    echo "⚠️ upload_state.json not found in extracted ZIP"
+                    echo "📂 Listing extracted files:"
+                    find "$ARTIFACT_TEMP" -type f | head -20 || true
+                  fi
+                else
+                  echo "⚠️ Failed to extract ZIP file (unzip may not be installed)"
+                  # Try installing unzip if not available
+                  sudo apt-get update && sudo apt-get install -y unzip || true
+                  if unzip -q "$ZIP_FILE" -d "$ARTIFACT_TEMP" 2>/dev/null; then
+                    EXTRACTED_FILE=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
+                    if [ -n "$EXTRACTED_FILE" ]; then
+                      cp "$EXTRACTED_FILE" ./upload_state.json
+                      echo "📄 Artifact state file extracted (after installing unzip): $(wc -c < upload_state.json) bytes"
+                      STATE_FOUND=true
+                    fi
                   fi
                 fi
-                
-                # Cleanup temp directory
-                rm -rf "$ARTIFACT_TEMP"
               else
-                echo "⚠️ No upload-state artifact found in previous run"
+                # Try to find JSON file directly (in case artifact isn't zipped)
+                DIRECT_JSON=$(find "$ARTIFACT_TEMP" -name "upload_state.json" -type f -print -quit 2>/dev/null)
+                if [ -n "$DIRECT_JSON" ]; then
+                  cp "$DIRECT_JSON" ./upload_state.json
+                  echo "📄 Found artifact state file directly: $(wc -c < upload_state.json) bytes"
+                  STATE_FOUND=true
+                else
+                  echo "⚠️ No ZIP or JSON file found in artifact"
+                  echo "📂 Listing artifact directory:"
+                  ls -la "$ARTIFACT_TEMP" || true
+                fi
               fi
+              
+              # Cleanup temp directory
+              rm -rf "$ARTIFACT_TEMP"
             else
-              echo "⚠️ No previous workflow runs found"
+              echo "⚠️ No upload-state artifact found in previous run"
             fi
+          else
+            echo "⚠️ No previous workflow runs found"
+          fi
+          
+          # Priority 2: Fallback to state file in repo (if committed)
+          if [ "$STATE_FOUND" = "false" ] && [ -f "upload_state.json" ]; then
+            echo "✅ Found state file in repository (fallback)"
+            echo "📄 Repo state file size: $(wc -c < upload_state.json) bytes"
+            STATE_FOUND=true
           fi
           
           if [ "$STATE_FOUND" = "false" ]; then
