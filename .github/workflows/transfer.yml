@@ -74,7 +74,7 @@ jobs:
           echo "🔍 Looking for previous upload state artifact..."
           
           # Get the most recent completed workflow run (excluding the current run)
-          CURRENT_RUN_ID="${{ github.run_id }}"
+          CURRENT_RUN_ID=${{ github.run_id }}
           LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=5 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[0].databaseId")
           
           if [ -z "$LATEST_RUN" ] || [ "$LATEST_RUN" = "null" ]; then
@@ -91,7 +91,7 @@ jobs:
             if [ -f "upload_state.json" ]; then
               echo "📄 State file size: $(wc -c < upload_state.json) bytes"
             else
-              find . -name "upload_state.json" -exec mv {} . \; 2>/dev/null || echo "⚠️ upload_state.json not found in artifact"
+              find . -name "upload_state.json" -exec mv {} ./upload_state.json \; -quit 2>/dev/null || echo "⚠️ upload_state.json not found in artifact"
             fi
           else
             echo "⚠️ No upload-state artifact found in previous run"
