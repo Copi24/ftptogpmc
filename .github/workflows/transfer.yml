@@ -73,29 +73,67 @@ jobs:
           cd repo
           echo "🔍 Looking for previous upload state artifact..."
           
-          # Get the most recent completed workflow run (excluding the current run)
+          # Get recent completed workflow runs (excluding the current run)
           CURRENT_RUN_ID=${{ github.run_id }}
-          LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=5 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[0].databaseId")
+          RECENT_RUNS=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=10 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[].databaseId")
           
-          if [ -z "$LATEST_RUN" ] || [ "$LATEST_RUN" = "null" ]; then
+          if [ -z "$RECENT_RUNS" ]; then
             echo "⚠️ No previous workflow runs found"
             exit 0
           fi
           
-          echo "📥 Found workflow run: $LATEST_RUN"
+          echo "📋 Found $(echo "$RECENT_RUNS" | wc -l) recent workflow run(s)"
           
-          # Try to download the upload-state artifact from that run
-          if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
-            echo "✅ Successfully downloaded upload-state artifact"
-            # The artifact might be in the current directory or a subdirectory
-            if [ -f "upload_state.json" ]; then
-              echo "📄 State file size: $(wc -c < upload_state.json) bytes"
+          # Try to download and evaluate each artifact to find the most complete one
+          BEST_RUN_ID=""
+          BEST_FILE_COUNT=0
+          TEMP_DIR=$(mktemp -d)
+          
+          for RUN_ID in $RECENT_RUNS; do
+            echo "🔍 Checking run $RUN_ID for upload-state artifact..."
+            
+            # Create a subdirectory for this run's artifact
+            RUN_DIR="$TEMP_DIR/run_$RUN_ID"
+            mkdir -p "$RUN_DIR"
+            
+            # Try to download the artifact using --dir to extract directly
+            if gh run download "$RUN_ID" --name upload-state --dir "$RUN_DIR" 2>/dev/null; then
+              echo "  ✅ Downloaded artifact from run $RUN_ID"
+              
+              # Check if upload_state.json exists in the extracted directory
+              if [ -f "$RUN_DIR/upload_state.json" ]; then
+                # Count completed files in this state
+                FILE_COUNT=$(jq -r '.completed | length' "$RUN_DIR/upload_state.json" 2>/dev/null || echo "0")
+                echo "  📊 Run $RUN_ID has $FILE_COUNT completed files"
+                
+                # Keep track of the best (most complete) artifact
+                if [ "$FILE_COUNT" -gt "$BEST_FILE_COUNT" ]; then
+                  BEST_FILE_COUNT="$FILE_COUNT"
+                  BEST_RUN_ID="$RUN_ID"
+                  echo "  🏆 New best: Run $RUN_ID with $FILE_COUNT files"
+                fi
+              else
+                echo "  ⚠️ upload_state.json not found in artifact"
+              fi
             else
-              find . -name "upload_state.json" -exec mv {} ./upload_state.json \; -quit 2>/dev/null || echo "⚠️ upload_state.json not found in artifact"
+              echo "  ⚠️ No upload-state artifact in run $RUN_ID"
             fi
+          done
+          
+          # Use the best artifact found
+          if [ -n "$BEST_RUN_ID" ]; then
+            echo ""
+            echo "✅ Selected run $BEST_RUN_ID with $BEST_FILE_COUNT completed files"
+            cp "$TEMP_DIR/run_$BEST_RUN_ID/upload_state.json" ./upload_state.json
+            echo "📄 State file size: $(wc -c < upload_state.json) bytes"
+            echo "📄 Completed files: $BEST_FILE_COUNT"
           else
-            echo "⚠️ No upload-state artifact found in previous run"
+            echo ""
+            echo "⚠️ No valid upload-state artifacts found in any recent run"
           fi
+          
+          # Cleanup temp directory
+          rm -rf "$TEMP_DIR"
       
       - name: Check state file
         run: |
