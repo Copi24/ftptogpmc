@@ -65,12 +65,31 @@ jobs:
           path: 'repo'
       
       - name: Download previous state (if exists)
-        uses: actions/download-artifact@v4
         continue-on-error: true
         id: download-state
-        with:
-          name: upload-state
-          path: repo/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd repo
+          echo "🔍 Looking for previous upload state artifact..."
+          
+          # Get the most recent completed workflow run (excluding the current one)
+          LATEST_RUN=$(gh run list --workflow=transfer.yml --status=completed --limit=1 --json databaseId --jq '.[0].databaseId')
+          
+          if [ -z "$LATEST_RUN" ]; then
+            echo "⚠️ No previous workflow runs found"
+            exit 0
+          fi
+          
+          echo "📥 Found workflow run: $LATEST_RUN"
+          
+          # Try to download the upload-state artifact from that run
+          if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
+            echo "✅ Successfully downloaded upload-state artifact"
+            ls -lh upload_state.json 2>/dev/null || echo "⚠️ upload_state.json not found in artifact"
+          else
+            echo "⚠️ No upload-state artifact found in previous run"
+          fi
       
       - name: Check state file
         run: |
