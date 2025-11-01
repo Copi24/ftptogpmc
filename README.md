@@ -134,7 +134,7 @@ python3 ftp_to_gphotos.py
 
 ## How It Works
 
-1. **State Loading**: Loads previous upload state from GitHub Actions artifacts (if exists)
+1. **State Loading**: Checks up to 10 recent workflow runs and loads the upload state artifact with the most completed files (smart selection ensures best continuity)
 2. **Discovery**: Depth-first traversal of FTP directories to find movie files
 3. **Filtering**: Identifies large movie files matching size and extension criteria
 4. **Smart Skip**: Skips files already successfully uploaded in previous runs
@@ -225,6 +225,7 @@ The state file is:
 - 📤 Uploaded as GitHub Actions artifact (90 day retention)
 - 📥 Downloaded at the start of each workflow run
 - 🔄 Enables seamless resumption across multiple runs
+- 🏆 **Smart Selection**: When multiple artifacts exist, the workflow automatically selects the one with the most completed files to ensure the most comprehensive state is used
 
 ## Acknowledgments
 
