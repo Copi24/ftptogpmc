@@ -74,6 +74,8 @@ jobs:
           echo "🔍 Looking for previous upload state artifact..."
           
           # Get recent completed workflow runs (excluding the current run)
+          # Limit set to 10 to balance thoroughness with performance
+          # (checking 10 runs should cover most failure scenarios while keeping execution time reasonable)
           CURRENT_RUN_ID=${{ github.run_id }}
           RECENT_RUNS=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=10 --json databaseId --jq "map(select(.databaseId != $CURRENT_RUN_ID)) | .[].databaseId")
           
@@ -103,11 +105,21 @@ jobs:
               # Check if upload_state.json exists in the extracted directory
               if [ -f "$RUN_DIR/upload_state.json" ]; then
                 # Count completed files in this state with validation
-                FILE_COUNT=$(jq -r '.completed | length' "$RUN_DIR/upload_state.json" 2>/dev/null)
+                # Capture jq errors for debugging
+                JQ_ERROR=$(mktemp)
+                FILE_COUNT=$(jq -r '.completed | length' "$RUN_DIR/upload_state.json" 2>"$JQ_ERROR")
+                JQ_EXIT_CODE=$?
                 
-                # Validate that FILE_COUNT is a valid number
-                if ! [[ "$FILE_COUNT" =~ ^[0-9]+$ ]]; then
-                  echo "  ⚠️ Invalid or malformed state file (non-numeric count), treating as 0"
+                # Check for jq parsing errors
+                if [ $JQ_EXIT_CODE -ne 0 ]; then
+                  echo "  ⚠️ jq parsing error: $(cat "$JQ_ERROR" | head -n 1)"
+                  FILE_COUNT=""
+                fi
+                rm -f "$JQ_ERROR"
+                
+                # Validate that FILE_COUNT is a valid non-empty number
+                if [ -z "$FILE_COUNT" ] || ! [[ "$FILE_COUNT" =~ ^[0-9]+$ ]]; then
+                  echo "  ⚠️ Invalid or malformed state file (count: '$FILE_COUNT'), treating as 0"
                   FILE_COUNT=0
                 fi
                 
