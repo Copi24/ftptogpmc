@@ -1,0 +1,62 @@
+name: Monitor and Restart Transfer
+
+on:
+  workflow_run:
+    workflows: ["FTP to Google Photos Transfer"]
+    types:
+      - completed
+
+jobs:
+  restart-on-timeout:
+    runs-on: ubuntu-latest
+    # Only run if the main workflow was cancelled (likely due to 6h timeout)
+    if: github.event.workflow_run.conclusion == 'cancelled'
+    steps:
+      - name: Check workflow status
+        id: check-status
+        run: |
+          echo "🔄 Main workflow was cancelled (likely due to 6h timeout)"
+          echo "⏰ Cancelled at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "🆔 Workflow run ID: ${{ github.event.workflow_run.id }}"
+          echo "📊 Conclusion: ${{ github.event.workflow_run.conclusion }}"
+          
+          # Check if it was likely a timeout (run duration close to 6 hours)
+          RUN_DURATION_MINUTES=${{ github.event.workflow_run.run_attempt }}
+          echo "⏱️  Run attempt: $RUN_DURATION_MINUTES"
+      
+      - name: Wait briefly for state to save
+        run: |
+          echo "⏳ Waiting 30 seconds to allow final state save..."
+          sleep 30
+      
+      - name: Restart main workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const workflowId = 'transfer.yml';
+            
+            console.log(`🔄 Triggering new run of FTP to Google Photos Transfer workflow...`);
+            console.log(`📊 Previous run cancelled, new run will continue from saved state`);
+            
+            try {
+              // Note: May need write permissions for workflow_dispatch
+              // If this fails, you may need to add a PAT with workflow permissions
+              const response = await github.rest.actions.createWorkflowDispatch({
+                owner,
+                repo,
+                workflow_id: workflowId,
+                ref: 'master'
+              });
+              
+              console.log(`✅ Successfully triggered new workflow run!`);
+              console.log(`⏱️  New run will start shortly and continue processing`);
+            } catch (error) {
+              console.error(`❌ Failed to trigger workflow:`, error);
+              console.error(`💡 If this fails due to permissions, you may need to:`);
+              console.error(`   1. Grant workflow_dispatch permissions to GITHUB_TOKEN`);
+              console.error(`   2. Or use a Personal Access Token (PAT) with workflow permissions`);
+              core.setFailed(`Failed to restart workflow: ${error.message}`);
+            }
+

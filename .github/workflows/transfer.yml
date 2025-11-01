@@ -3,15 +3,10 @@ name: FTP to Google Photos Transfer
 on:
   workflow_dispatch:
   schedule:
-    # Run every 6.5 hours to continue processing after 6h timeout
-    # When runner hits 6h limit and gets cancelled, next run starts 6.5h after previous run STARTED
-    # This gives 0.5h buffer after cancellation (06:00) before next start (06:30)
-    # Pattern: Exactly 6.5h intervals - run at 00:00, 06:30, 13:00, 19:30, then next day 02:00, 08:30, 15:00, 21:30, 04:00, 10:30, 17:00, 23:30, then repeats
-    # Since cron can't do exact 6.5h, we use two schedules that alternate to achieve 6.5h spacing
-    - cron: '0 0,2,4,6,13,15,17,19,21,23 * * *'      # Every 6h at :00: 00:00, 02:00, 04:00, 06:00, 13:00, 15:00, 17:00, 19:00, 21:00, 23:00
-    - cron: '30 6,8,14,19,21 * * *'                   # At :30 for 6.5h spacing: 06:30, 08:30, 14:30, 19:30, 21:30
-    - cron: '0 1,3,5,7,8,9,10,11,16,18,20,22 * * *'  # Additional hour slots for continuous 6.5h coverage
-    - cron: '30 1,3,7,9,12,20,22 * * *'              # Additional :30 slots for continuous 6.5h coverage
+    # Fallback schedule: Run every 6 hours as backup (in case monitoring workflow fails)
+    # The monitor-and-restart.yml workflow will trigger this automatically when cancelled
+    # But we keep a schedule as backup to ensure continuous processing
+    - cron: '0 */6 * * *'  # Every 6 hours
   push:
     branches:
       - main
