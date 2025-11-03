@@ -2,11 +2,6 @@ name: FTP to Google Photos Transfer
 
 on:
   workflow_dispatch:
-  schedule:
-    # Fallback schedule: Run every 6 hours as backup (in case monitoring workflow fails)
-    # The monitor-and-restart.yml workflow will trigger this automatically when cancelled
-    # But we keep a schedule as backup to ensure continuous processing
-    - cron: '0 */6 * * *'  # Every 6 hours
   push:
     branches:
       - main
