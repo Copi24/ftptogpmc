@@ -120,9 +120,12 @@ class PhotoOrganizer:
             target_filename = self.map_iso_to_mkv(filename)
             
             # Use album_path as the album name (folder structure)
+            # Files in root (empty album_path) are skipped - they stay in main library
             if album_path:
                 self.file_to_album_map[target_filename] = album_path
                 logger.debug(f"  {target_filename} -> album: {album_path}")
+            else:
+                logger.debug(f"  {target_filename} -> (root, no album)")
         
         # Process subdirectories recursively
         for subdir in node.get('subdirectories', []):
@@ -171,7 +174,10 @@ class PhotoOrganizer:
             
             # If completed is a list of paths (old format), we can't get media keys
             if isinstance(completed, list):
-                logger.warning("⚠️ Old state format - doesn't contain media keys")
+                logger.warning("⚠️ Old state format (v1.0) detected - doesn't contain media keys")
+                logger.warning("   The state file needs to be updated to v2.0 format with media keys")
+                logger.warning("   Re-run the upload workflow to generate the new format")
+                logger.warning("   For now, files will be skipped during organization")
                 return
             
             # If it's a dict mapping path -> info, extract media keys
@@ -277,7 +283,9 @@ class PhotoOrganizer:
                     logger.info(f"   ✅ Successfully added {len(media_keys)} files to album")
                     successful += len(media_keys)
                 else:
-                    logger.error(f"   ❌ Failed to add files to album (unknown error)")
+                    logger.error(f"   ❌ Failed to add files to album")
+                    logger.error(f"      Result from API: {result}")
+                    logger.error(f"      This may indicate an API error or authentication issue")
                     failed += len(media_keys)
                     
             except Exception as e:
