@@ -87,13 +87,9 @@ schedule:
 You can also run the script locally:
 
 ```bash
-# Install rclone if not already installed
-curl https://rclone.org/install.sh | sudo bash
+# Install Python 3.11 or higher if not already installed
 
-# Configure rclone with your FTP credentials
-rclone config
-
-# Run the script
+# Run the script (no rclone needed - uses native Python FTP)
 python3 generate_ftp_tree.py
 
 # Output files will be created in the current directory:
@@ -172,14 +168,15 @@ FTP_SERVERS = {
 
 ## Troubleshooting
 
-### "rclone not found"
-- Ensure rclone is installed: `rclone version`
-- In GitHub Actions, this is handled automatically
+### "Failed to connect to FTP server"
+- Check that FTP credentials in `generate_ftp_tree.py` are correct
+- Verify FTP server is accessible
+- Ensure port 13017 is not blocked by firewall
 
 ### "Failed to list directories"
-- Check that `RCLONE_CONFIG` secret is set correctly in repository settings
 - Verify FTP credentials are valid
 - Check FTP server is accessible
+- The script uses native Python FTP (ftplib) - same method as the working FTP to GPMC workflow
 
 ### Timeout issues
 - For very large FTP structures (10,000+ files), increase the workflow timeout:
@@ -196,7 +193,7 @@ FTP_SERVERS = {
 
 - **ISO Conversion**: Remember that ISO files were automatically converted to MKV during upload to Google Photos
 - **Retention**: Manifest artifacts are kept for 365 days (1 year)
-- **Performance**: The script uses rclone's optimized FTP listing, but large structures may take time
+- **Method**: The script uses native Python FTP (ftplib) - the same reliable method as the FTP to GPMC workflow
 - **Incremental**: Each run generates a fresh snapshot; it doesn't track changes over time
 
 ## Related Workflows
