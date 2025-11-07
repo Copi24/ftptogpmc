@@ -7,6 +7,7 @@ Provides reliable directory and file listing using ftplib instead of rclone.
 import ftplib
 import socket
 import logging
+import time
 from typing import List, Dict, Optional
 from datetime import datetime
 import re
@@ -31,12 +32,8 @@ class FTPLister:
             else:
                 self.ftp = ftplib.FTP()
             
-            # Set long timeout for slow connections
-            self.ftp.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.ftp.sock.settimeout(300)  # 5 minute timeout
-            
             logger.info(f"Connecting to {self.host}:{self.port}...")
-            self.ftp.connect(self.host, self.port)
+            self.ftp.connect(self.host, self.port, timeout=300)  # 5 minute timeout
             self.ftp.login(self.user, self.password)
             
             if self.use_tls:
@@ -219,7 +216,6 @@ def list_directories_with_retry(host: str, user: str, password: str, port: int,
                 logger.error("Failed to connect to FTP server")
                 lister.disconnect()
                 if attempt < max_attempts:
-                    import time
                     wait_time = 10 * attempt
                     logger.info(f"⏳ Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
@@ -233,7 +229,6 @@ def list_directories_with_retry(host: str, user: str, password: str, port: int,
             logger.error(f"Attempt {attempt} failed: {e}")
             lister.disconnect()
             if attempt < max_attempts:
-                import time
                 wait_time = 10 * attempt
                 logger.info(f"⏳ Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
@@ -254,7 +249,6 @@ def list_files_with_retry(host: str, user: str, password: str, port: int,
                 logger.error("Failed to connect to FTP server")
                 lister.disconnect()
                 if attempt < max_attempts:
-                    import time
                     wait_time = 10 * attempt
                     logger.info(f"⏳ Waiting {wait_time}s before retry...")
                     time.sleep(wait_time)
@@ -268,7 +262,6 @@ def list_files_with_retry(host: str, user: str, password: str, port: int,
             logger.error(f"Attempt {attempt} failed: {e}")
             lister.disconnect()
             if attempt < max_attempts:
-                import time
                 wait_time = 10 * attempt
                 logger.info(f"⏳ Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)

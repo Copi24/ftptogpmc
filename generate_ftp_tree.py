@@ -39,7 +39,7 @@ FTP_SERVERS = {
     "Sputnik": {"host": "sputnik.whatbox.ca", "port": 13017},
 }
 CURRENT_SERVER = "Challenger"  # Using Challenger (Blockbuster Movies)
-# Direct FTP credentials (same as ftp_to_gphotos.py)
+# FTP credentials (same as ftp_to_gphotos.py for consistency)
 FTP_USER = "Lomusire"
 FTP_PASS = "NoSymbols"
 
