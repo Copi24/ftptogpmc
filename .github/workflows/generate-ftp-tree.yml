@@ -54,13 +54,7 @@ jobs:
           if [ -f "ftp_structure_manifest.json" ]; then
             echo ""
             echo "📄 Manifest statistics:"
-            python3 << 'PYEOF'
-          import json
-          with open('ftp_structure_manifest.json') as f:
-              data = json.load(f)
-              print(f"Total files: {data['statistics']['total_files']}")
-              print(f"Total size: {data['statistics']['total_size_gb']} GB")
-          PYEOF
+            python3 -c 'import json; data = json.load(open("ftp_structure_manifest.json")); print(f"Total files: {data[\"statistics\"][\"total_files\"]}"); print(f"Total size: {data[\"statistics\"][\"total_size_gb\"]} GB")'
           fi
           
           if [ -f "ftp_structure_tree.txt" ]; then
@@ -98,17 +92,7 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "## Statistics" >> $GITHUB_STEP_SUMMARY
             
-            python3 << 'PYEOF' >> $GITHUB_STEP_SUMMARY
-          import json
-          with open('ftp_structure_manifest.json') as f:
-              data = json.load(f)
-              stats = data['statistics']
-              meta = data['metadata']
-              print(f"- **Total Files:** {stats['total_files']:,}")
-              print(f"- **Total Size:** {stats['total_size_gb']:,.2f} GB")
-              print(f"- **Server:** {meta['server']} ({meta['server_host']})")
-              print(f"- **Generated:** {meta['generated_at']}")
-          PYEOF
+            python3 -c 'import json; data = json.load(open("ftp_structure_manifest.json")); stats = data["statistics"]; meta = data["metadata"]; print(f"- **Total Files:** {stats[\"total_files\"]:,}"); print(f"- **Total Size:** {stats[\"total_size_gb\"]:,.2f} GB"); print(f"- **Server:** {meta[\"server\"]} ({meta[\"server_host\"]})"); print(f"- **Generated:** {meta[\"generated_at\"]}")' >> $GITHUB_STEP_SUMMARY
             
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "## Output Files" >> $GITHUB_STEP_SUMMARY

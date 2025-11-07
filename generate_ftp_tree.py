@@ -10,9 +10,10 @@ import sys
 import subprocess
 import json
 import logging
+import traceback
 from pathlib import Path
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Configure logging
 logging.basicConfig(
@@ -74,12 +75,13 @@ def list_directories(remote: str, path: str = "") -> List[str]:
         for line in result.stdout.strip().split('\n'):
             if not line.strip():
                 continue
-            # lsd output format: size date time size name
+            # lsd output format: size date time name
             # Example: "          -1 2025-10-31 10:33:09        -1 Challenger"
+            # Note: First field is size, followed by date, time, and directory name
             parts = line.split()
-            if len(parts) >= 5:
-                # Skip first 4 columns: size, date, time, size
-                dir_name = ' '.join(parts[4:])  # Handle names with spaces
+            if len(parts) >= 4:
+                # Skip first 3 columns: size, date, time
+                dir_name = ' '.join(parts[3:])  # Handle names with spaces
                 dirs.append(dir_name)
                 logger.debug(f"  Found directory: {dir_name}")
         
@@ -237,7 +239,7 @@ def save_manifest(tree: Dict, output_file: str = "ftp_structure_manifest.json"):
     """
     manifest = {
         'metadata': {
-            'generated_at': datetime.utcnow().isoformat(),
+            'generated_at': datetime.now(timezone.utc).isoformat(),
             'server': CURRENT_SERVER,
             'server_host': FTP_SERVERS[CURRENT_SERVER]['host'],
             'note': 'ISO files were converted to MKV during upload to Google Photos'
@@ -269,7 +271,7 @@ def save_text_tree(tree_text: str, output_file: str = "ftp_structure_tree.txt"):
             f.write("FTP SERVER DIRECTORY STRUCTURE\n")
             f.write("=" * 80 + "\n")
             f.write(f"Server: {CURRENT_SERVER} ({FTP_SERVERS[CURRENT_SERVER]['host']})\n")
-            f.write(f"Generated: {datetime.utcnow().isoformat()}\n")
+            f.write(f"Generated: {datetime.now(timezone.utc).isoformat()}\n")
             f.write("Note: ISO files were converted to MKV during upload to Google Photos\n")
             f.write("=" * 80 + "\n\n")
             f.write(tree_text)
@@ -338,7 +340,6 @@ def main():
         return 1
     except Exception as e:
         logger.error(f"❌ Error during tree generation: {e}")
-        import traceback
         logger.error(traceback.format_exc())
         return 1
 
