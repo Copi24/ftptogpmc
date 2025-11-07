@@ -247,6 +247,41 @@ Need to organize files in Google Photos based on their original FTP structure? U
 
 📖 **Full documentation**: See [FTP_TREE_GENERATOR.md](FTP_TREE_GENERATOR.md) for detailed usage, examples, and API reference.
 
+## Organize Files in Google Photos
+
+After uploading all movies, organize them into albums matching the FTP folder structure using the **Organize Google Photos Files** workflow.
+
+### Quick Start
+
+1. **Prerequisites**: Run the workflows above to upload files and generate the manifest
+2. Go to **Actions** → **Organize Google Photos Files**
+3. Click **Run workflow** with **dry_run: true** to preview
+4. Review the logs to verify the organization plan
+5. Run again with **dry_run: false** to actually organize files
+
+### What It Does
+
+- Reads the FTP manifest to understand folder structure
+- Maps ISO files to their MKV equivalents (from upload conversion)
+- Creates albums in Google Photos matching FTP folder paths
+- Moves uploaded files into their corresponding albums
+
+### Example
+
+FTP structure:
+```
+Blockbuster Movies/
+└── Avatar (2009)/
+    ├── Avatar.3D.2009.iso → uploaded as Avatar.3D.2009.mkv
+    └── Avatar.2009.3D.BluRay.mkv
+```
+
+Result in Google Photos:
+- Album: "Blockbuster Movies/Avatar (2009)"
+  - Contains: Avatar.3D.2009.mkv, Avatar.2009.3D.BluRay.mkv
+
+📖 **Full documentation**: See [ORGANIZE_GPHOTOS.md](ORGANIZE_GPHOTOS.md) for detailed usage and troubleshooting.
+
 ## Acknowledgments
 
 - [google_photos_mobile_client](https://github.com/xob0t/google_photos_mobile_client) - Google Photos upload library

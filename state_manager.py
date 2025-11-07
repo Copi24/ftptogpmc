@@ -21,7 +21,24 @@ class StateManager:
         if self.state_file.exists():
             try:
                 with open(self.state_file, 'r') as f:
-                    return json.load(f)
+                    state = json.load(f)
+                
+                # Migrate old format (v1.0) to new format (v2.0)
+                if state.get('version') == '1.0' and isinstance(state.get('completed'), list):
+                    print("ℹ️  Migrating state from v1.0 to v2.0 format...")
+                    old_completed = state['completed']
+                    state['completed'] = {}
+                    # Convert list to dict (no media keys available from old format)
+                    for file_path in old_completed:
+                        state['completed'][file_path] = {
+                            'media_key': None,  # Not available in old format
+                            'size': 0,
+                            'timestamp': state.get('last_updated', datetime.utcnow().isoformat())
+                        }
+                    state['version'] = '2.0'
+                    print(f"✅ Migrated {len(old_completed)} files to new format")
+                
+                return state
             except Exception as e:
                 print(f"Warning: Could not load state file: {e}")
                 return self._create_new_state()
@@ -30,9 +47,9 @@ class StateManager:
     def _create_new_state(self) -> Dict:
         """Create new empty state."""
         return {
-            'version': '1.0',
+            'version': '2.0',  # Version 2.0 uses dict for completed with media keys
             'last_updated': datetime.utcnow().isoformat(),
-            'completed': [],      # Files successfully uploaded
+            'completed': {},      # Files successfully uploaded (path -> {media_key, size, timestamp})
             'failed': {},         # Files that failed with attempt count
             'in_progress': None,  # Currently processing file
             'skipped': [],        # Files skipped (too large, etc)
@@ -85,9 +102,15 @@ class StateManager:
     def mark_completed(self, file_path: str, size_bytes: int, media_key: str):
         """Mark file as successfully uploaded."""
         if file_path not in self.state['completed']:
-            self.state['completed'].append(file_path)
             self.state['stats']['total_uploaded'] += 1
             self.state['stats']['total_bytes'] += size_bytes
+        
+        # Store with media key and metadata (v2.0 format)
+        self.state['completed'][file_path] = {
+            'media_key': media_key,
+            'size': size_bytes,
+            'timestamp': datetime.utcnow().isoformat()
+        }
         
         # Remove from failed if it was there
         if file_path in self.state['failed']:
