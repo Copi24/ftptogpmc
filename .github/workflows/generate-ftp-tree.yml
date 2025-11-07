@@ -24,23 +24,6 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Install rclone
-        run: |
-          curl https://rclone.org/install.sh | sudo bash
-          rclone version
-      
-      - name: Configure rclone
-        run: |
-          mkdir -p ~/.config/rclone
-          echo "${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
-          chmod 600 ~/.config/rclone/rclone.conf
-          echo "✅ Rclone config created"
-      
-      - name: Test rclone connection
-        run: |
-          echo "🔍 Testing connection to FTP server..."
-          rclone lsd Challenger: --max-depth 1 || echo "⚠️  Warning: Could not list root directory"
-      
       - name: Generate FTP structure tree
         run: |
           echo "📡 Starting FTP tree generation..."

@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
 
+try:
+    from ftp_lister import list_directories_with_retry, list_files_with_retry
+except ImportError:
+    print("ERROR: ftp_lister.py not found")
+    sys.exit(1)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -33,118 +39,44 @@ FTP_SERVERS = {
     "Sputnik": {"host": "sputnik.whatbox.ca", "port": 13017},
 }
 CURRENT_SERVER = "Challenger"  # Using Challenger (Blockbuster Movies)
+# Direct FTP credentials (same as ftp_to_gphotos.py)
+FTP_USER = "Lomusire"
+FTP_PASS = "NoSymbols"
 
 
-def check_rclone_installed() -> bool:
-    """Check if rclone is installed and accessible."""
-    try:
-        result = subprocess.run(['rclone', 'version'], capture_output=True, text=True, timeout=10)
-        if result.returncode == 0:
-            logger.info(f"✓ rclone version: {result.stdout.strip().split()[1]}")
-            return True
-        return False
-    except FileNotFoundError:
-        logger.error("❌ rclone not found in PATH")
-        return False
-    except Exception as e:
-        logger.error(f"❌ Error checking rclone: {e}")
-        return False
-
-
-def list_directories(remote: str, path: str = "") -> List[str]:
+def list_directories(path: str = "") -> List[str]:
     """
-    List directories in a path using rclone lsd.
+    List directories in a path using native Python FTP.
     Returns list of directory names.
     """
-    try:
-        cmd = [
-            'rclone', 'lsd', f'{remote}:{path}',
-            '--timeout', '120s',
-            '--contimeout', '60s',
-            '--low-level-retries', '5',
-            '--retries', '3'
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        
-        if result.returncode != 0:
-            logger.warning(f"⚠️  Failed to list directories in {path}: {result.stderr[:200]}")
-            return []
-        
-        dirs = []
-        for line in result.stdout.strip().split('\n'):
-            if not line.strip():
-                continue
-            # lsd output format: size date time name
-            # Example: "          -1 2025-10-31 10:33:09        -1 Challenger"
-            # Note: First field is size, followed by date, time, and directory name
-            parts = line.split()
-            if len(parts) >= 4:
-                # Skip first 3 columns: size, date, time
-                dir_name = ' '.join(parts[3:])  # Handle names with spaces
-                dirs.append(dir_name)
-                logger.debug(f"  Found directory: {dir_name}")
-        
-        return dirs
-        
-    except Exception as e:
-        logger.warning(f"⚠️  Error listing directories in {path}: {e}")
-        return []
+    server_info = FTP_SERVERS[CURRENT_SERVER]
+    return list_directories_with_retry(
+        host=server_info['host'],
+        user=FTP_USER,
+        password=FTP_PASS,
+        port=server_info['port'],
+        path=path,
+        max_attempts=3
+    )
 
 
-def list_all_files(remote: str, path: str = "") -> List[Dict]:
+def list_all_files(path: str = "") -> List[Dict]:
     """
-    List ALL files in a directory (non-recursive) using rclone ls.
+    List ALL files in a directory (non-recursive) using native Python FTP.
     Returns list of dicts with file info.
     """
-    try:
-        cmd = [
-            'rclone', 'ls', f'{remote}:{path}',
-            '--max-depth', '1',
-            '--timeout', '300s',
-            '--contimeout', '60s',
-            '--low-level-retries', '5',
-            '--retries', '3'
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=420)
-        
-        if result.returncode != 0:
-            logger.warning(f"⚠️  Failed to list files in {path}: {result.stderr[:200]}")
-            return []
-        
-        files = []
-        for line in result.stdout.strip().split('\n'):
-            if not line.strip():
-                continue
-            parts = line.split(None, 1)
-            if len(parts) == 2:
-                try:
-                    file_size = int(parts[0])
-                    file_name = parts[1]
-                    
-                    full_path = os.path.join(path, file_name) if path else file_name
-                    # Normalize path separators
-                    full_path = full_path.replace('\\', '/')
-                    
-                    files.append({
-                        'name': file_name,
-                        'path': full_path,
-                        'size': file_size,
-                        'size_gb': round(file_size / (1024**3), 2),
-                        'size_mb': round(file_size / (1024**2), 2)
-                    })
-                except ValueError:
-                    continue
-        
-        return files
-        
-    except Exception as e:
-        logger.warning(f"⚠️  Error listing files in {path}: {e}")
-        return []
+    server_info = FTP_SERVERS[CURRENT_SERVER]
+    return list_files_with_retry(
+        host=server_info['host'],
+        user=FTP_USER,
+        password=FTP_PASS,
+        port=server_info['port'],
+        path=path,
+        max_attempts=3
+    )
 
 
-def traverse_ftp_tree(remote: str, path: str = "", depth: int = 0) -> Dict:
+def traverse_ftp_tree(path: str = "", depth: int = 0) -> Dict:
     """
     Recursively traverse FTP directory structure and build a complete tree.
     Returns a dictionary representing the directory structure.
@@ -164,7 +96,7 @@ def traverse_ftp_tree(remote: str, path: str = "", depth: int = 0) -> Dict:
     }
     
     # List all files in current directory
-    files = list_all_files(remote, path)
+    files = list_all_files(path)
     if files:
         logger.info(f"{indent}  ✓ Found {len(files)} file(s)")
         tree_node['files'] = files
@@ -172,18 +104,18 @@ def traverse_ftp_tree(remote: str, path: str = "", depth: int = 0) -> Dict:
         tree_node['total_size'] = sum(f['size'] for f in files)
     
     # Get subdirectories and recurse
-    subdirs = list_directories(remote, path)
+    subdirs = list_directories(path)
     if subdirs:
         logger.info(f"{indent}  ↳ Found {len(subdirs)} subdirectory(ies)")
         for subdir in subdirs:
-            # Use forward slashes for paths (rclone standard)
+            # Use forward slashes for paths (consistent with ftp_to_gphotos.py)
             if path:
                 subpath = f"{path}/{subdir}"
             else:
                 subpath = subdir
             
             # Recursively process subdirectory
-            subtree = traverse_ftp_tree(remote, subpath, depth + 1)
+            subtree = traverse_ftp_tree(subpath, depth + 1)
             tree_node['subdirectories'].append(subtree)
             
             # Aggregate counts
@@ -289,19 +221,15 @@ def main():
     logger.info("=" * 80)
     logger.info(f"Server: {CURRENT_SERVER}")
     logger.info(f"Host: {FTP_SERVERS[CURRENT_SERVER]['host']}:{FTP_SERVERS[CURRENT_SERVER]['port']}")
+    logger.info(f"Using: Native Python FTP (ftplib) - same as FTP to GPMC workflow")
     logger.info("")
-    
-    # Check rclone
-    if not check_rclone_installed():
-        logger.error("❌ rclone is not installed. Please install it first.")
-        sys.exit(1)
     
     # Generate the tree
     logger.info("📡 Starting FTP directory traversal...")
     logger.info("")
     
     try:
-        tree = traverse_ftp_tree(CURRENT_SERVER)
+        tree = traverse_ftp_tree()
         
         logger.info("")
         logger.info("=" * 80)
