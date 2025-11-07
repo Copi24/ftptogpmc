@@ -57,7 +57,7 @@ jobs:
               if [ -f "ftp_structure_manifest.json" ]; then
                 echo "✅ Found ftp_structure_manifest.json"
                 # Show basic stats
-                python3 -c 'import json; data = json.load(open("ftp_structure_manifest.json")); print(f"Total files: {data[\"statistics\"][\"total_files\"]}"); print(f"Total size: {data[\"statistics\"][\"total_size_gb\"]} GB")'
+                python3 -c 'import json; data = json.load(open("ftp_structure_manifest.json")); stats = data["statistics"]; print(f"Total files: {stats['"'"'total_files'"'"']}"); print(f"Total size: {stats['"'"'total_size_gb'"'"']} GB")'
               else
                 echo "❌ ftp_structure_manifest.json not found in artifact"
                 exit 1
