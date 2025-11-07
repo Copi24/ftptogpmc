@@ -1,0 +1,167 @@
+name: Organize Google Photos Files
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      dry_run:
+        description: 'Dry run mode (no actual changes)'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  PYTHONUNBUFFERED: 1
+
+jobs:
+  organize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours max
+    permissions:
+      contents: read
+      actions: read  # Needed to download artifacts
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install https://github.com/xob0t/google_photos_mobile_client/archive/refs/heads/main.zip --force-reinstall
+      
+      - name: Download FTP structure manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📥 Downloading FTP structure manifest from artifacts..."
+          
+          # Find the most recent successful run of generate-ftp-tree workflow
+          LATEST_RUN=$(gh run list --workflow=.github/workflows/generate-ftp-tree.yml --status=completed --limit=1 --json databaseId --jq ".[0].databaseId")
+          
+          if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
+            echo "✅ Found workflow run: $LATEST_RUN"
+            
+            # Download the ftp-structure-manifest artifact
+            if gh run download $LATEST_RUN --name ftp-structure-manifest 2>/dev/null; then
+              echo "✅ Successfully downloaded manifest artifact"
+              
+              # List downloaded files
+              echo "📂 Downloaded files:"
+              ls -lh ftp_structure_manifest.json ftp_structure_tree.txt 2>/dev/null || ls -lh
+              
+              if [ -f "ftp_structure_manifest.json" ]; then
+                echo "✅ Found ftp_structure_manifest.json"
+                # Show basic stats
+                python3 -c 'import json; data = json.load(open("ftp_structure_manifest.json")); print(f"Total files: {data[\"statistics\"][\"total_files\"]}"); print(f"Total size: {data[\"statistics\"][\"total_size_gb\"]} GB")'
+              else
+                echo "❌ ftp_structure_manifest.json not found in artifact"
+                exit 1
+              fi
+            else
+              echo "❌ Failed to download manifest artifact"
+              echo "Please run 'Generate FTP Structure Tree' workflow first"
+              exit 1
+            fi
+          else
+            echo "❌ No successful 'Generate FTP Structure Tree' workflow runs found"
+            echo "Please run that workflow first to generate the manifest"
+            exit 1
+          fi
+      
+      - name: Download upload state (for media keys)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📥 Downloading upload state (contains media keys)..."
+          
+          # Find the most recent successful run of transfer workflow
+          LATEST_RUN=$(gh run list --workflow=.github/workflows/transfer.yml --status=completed --limit=1 --json databaseId --jq ".[0].databaseId")
+          
+          if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
+            echo "✅ Found workflow run: $LATEST_RUN"
+            
+            # Download the upload-state artifact
+            if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
+              echo "✅ Successfully downloaded upload-state artifact"
+              
+              if [ -f "upload_state.json" ]; then
+                echo "✅ Found upload_state.json"
+                # Show stats
+                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); print(f"Completed uploads: {len(completed) if isinstance(completed, dict) else len(completed)}")'
+              else
+                echo "⚠️ upload_state.json not found - will not be able to organize files"
+              fi
+            else
+              echo "⚠️ Failed to download upload-state artifact"
+              echo "Organization will be limited without media keys"
+            fi
+          else
+            echo "⚠️ No successful transfer workflow runs found"
+            echo "Upload files first using 'FTP to Google Photos Transfer' workflow"
+          fi
+      
+      - name: Run organization script
+        env:
+          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
+        run: |
+          # Determine if dry run mode
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "🔍 Running in DRY RUN mode - no changes will be made"
+            python3 organize_gphotos.py --dry-run
+          else
+            echo "🚀 Running in LIVE mode - files will be organized"
+            python3 organize_gphotos.py
+          fi
+        continue-on-error: false
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: organization-logs
+          path: organize_gphotos.log
+          retention-days: 30
+      
+      - name: Create summary
+        if: always()
+        run: |
+          echo "# Google Photos Organization Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "🔍 **Mode:** Dry Run (no changes made)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🚀 **Mode:** Live (files organized)" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "organize_gphotos.log" ]; then
+            # Extract statistics from log file
+            SUCCESSFUL=$(grep -c "✅ Successfully added" organize_gphotos.log || echo "0")
+            FAILED=$(grep -c "❌ Failed to add" organize_gphotos.log || echo "0")
+            SKIPPED=$(grep -c "⚠️ Not in cache" organize_gphotos.log || echo "0")
+            
+            echo "## Results" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Successful: $SUCCESSFUL albums" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ Failed: $FAILED albums" >> $GITHUB_STEP_SUMMARY
+            echo "- ⏭️ Skipped: $SKIPPED files" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+              echo "ℹ️ Run again without dry-run mode to actually organize files" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ Files have been organized into albums in Google Photos" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ **Status:** Failed - Check logs for details" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📥 Download logs from the **Artifacts** section above for details" >> $GITHUB_STEP_SUMMARY
