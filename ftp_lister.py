@@ -64,51 +64,48 @@ class FTPLister:
         Returns list of directory names.
         """
         try:
-            # Use MLSD if available (more reliable and structured)
             dirs = []
+            # Try to change to the directory first
+            original_cwd = self.ftp.pwd()
+            if path:
+                self.ftp.cwd(path)
+            
+            # List entries using MLSD (machine-readable listing)
             try:
-                # Try to change to the directory first
-                original_cwd = self.ftp.pwd()
-                if path:
-                    self.ftp.cwd(path)
+                for name, facts in self.ftp.mlsd():
+                    if name in ['.', '..']:
+                        continue
+                    if facts.get('type') == 'dir':
+                        dirs.append(name)
+                        logger.debug(f"  Found directory: {name}")
+            except ftplib.error_perm:
+                # MLSD not supported, fall back to NLST
+                logger.debug("MLSD not supported, using LIST fallback")
                 
-                # List entries using MLSD (machine-readable listing)
-                try:
-                    for name, facts in self.ftp.mlsd():
-                        if name in ['.', '..']:
-                            continue
-                        if facts.get('type') == 'dir':
-                            dirs.append(name)
-                            logger.debug(f"  Found directory: {name}")
-                except ftplib.error_perm:
-                    # MLSD not supported, fall back to NLST
-                    logger.debug("MLSD not supported, using LIST fallback")
-                    
-                    # Get all entries
-                    entries = []
-                    self.ftp.retrlines('LIST', entries.append)
-                    
-                    for entry in entries:
-                        # Parse Unix-style directory listing
-                        # Format: drwxr-xr-x 2 user group size date time name
-                        if entry.startswith('d'):  # Directory
-                            parts = entry.split(None, 8)
-                            if len(parts) >= 9:
-                                name = parts[8]
-                                if name not in ['.', '..']:
-                                    dirs.append(name)
-                                    logger.debug(f"  Found directory: {name}")
+                # Get all entries
+                entries = []
+                self.ftp.retrlines('LIST', entries.append)
                 
-                # Return to original directory
-                if path:
-                    self.ftp.cwd(original_cwd)
+                for entry in entries:
+                    # Parse Unix-style directory listing
+                    # Format: drwxr-xr-x 2 user group size date time name
+                    if entry.startswith('d'):  # Directory
+                        parts = entry.split(None, 8)
+                        if len(parts) >= 9:
+                            name = parts[8]
+                            if name not in ['.', '..']:
+                                dirs.append(name)
+                                logger.debug(f"  Found directory: {name}")
+            
+            # Return to original directory
+            if path:
+                self.ftp.cwd(original_cwd)
+            
+            return dirs
                 
-                return dirs
-                
-            except ftplib.error_perm as e:
-                logger.warning(f"Permission error listing {path}: {e}")
-                return []
-                
+        except ftplib.error_perm as e:
+            logger.warning(f"Permission error listing {path}: {e}")
+            return []
         except Exception as e:
             logger.warning(f"Error listing directories in {path}: {e}")
             return []
@@ -140,9 +137,9 @@ class FTPLister:
                             # Get size from facts or use SIZE command
                             size = int(facts.get('size', 0))
                             if size == 0:
-                                # Try SIZE command
+                                # Try SIZE command (requires binary mode)
                                 try:
-                                    self.ftp.voidcmd('TYPE I')
+                                    self.ftp.voidcmd('TYPE I')  # Set binary mode for accurate size
                                     size = self.ftp.size(name)
                                 except:
                                     pass
@@ -176,9 +173,9 @@ class FTPLister:
                             try:
                                 size = int(parts[4])
                             except:
-                                # Try SIZE command
+                                # Try SIZE command (requires binary mode)
                                 try:
-                                    self.ftp.voidcmd('TYPE I')
+                                    self.ftp.voidcmd('TYPE I')  # Set binary mode for accurate size
                                     size = self.ftp.size(name)
                                 except:
                                     size = 0
