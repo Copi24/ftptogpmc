@@ -152,6 +152,8 @@ class PhotoOrganizer:
         The upload state file contains media_key for each successfully uploaded file.
         This allows us to skip re-uploading or re-searching for files.
         
+        Note: ISO files were converted to MKV during upload, so we map the keys accordingly.
+        
         Args:
             state_file: Path to upload_state.json
         """
@@ -178,8 +180,18 @@ class PhotoOrganizer:
                     if isinstance(info, dict) and 'media_key' in info:
                         filename = os.path.basename(file_path)
                         media_key = info['media_key']
+                        
+                        # Store with original filename
                         self.media_cache[filename] = media_key
-                        logger.debug(f"  Cached: {filename} -> {media_key}")
+                        
+                        # If it's an ISO file, also store the MKV mapping
+                        # (ISO files were converted to MKV during upload)
+                        if filename.lower().endswith('.iso'):
+                            mkv_filename = self.map_iso_to_mkv(filename)
+                            self.media_cache[mkv_filename] = media_key
+                            logger.debug(f"  Cached ISO mapping: {filename} -> {mkv_filename} -> {media_key}")
+                        else:
+                            logger.debug(f"  Cached: {filename} -> {media_key}")
             
             logger.info(f"✅ Loaded {len(self.media_cache)} media keys from state file")
             
