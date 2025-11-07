@@ -17,6 +17,7 @@ import sys
 import json
 import logging
 import hashlib
+import sqlite3
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
@@ -56,6 +57,7 @@ class PhotoOrganizer:
         self.manifest = None
         self.file_to_album_map = {}
         self.media_cache = {}  # Cache of filename -> media_key
+        self.gpmc_cache_path = None  # Path to gpmc cache database
         
     def load_manifest(self) -> bool:
         """Load the FTP structure manifest from JSON file."""
@@ -83,6 +85,15 @@ class PhotoOrganizer:
         try:
             self.client = Client(auth_data=self.auth_data)
             logger.info("✅ Google Photos client initialized")
+            
+            # Set the gpmc cache path (same location gpmc uses)
+            self.gpmc_cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+            if self.gpmc_cache_path.exists():
+                logger.info(f"✅ Found gpmc cache database at {self.gpmc_cache_path}")
+            else:
+                logger.warning(f"⚠️ gpmc cache database not found at {self.gpmc_cache_path}")
+                logger.warning("   Consider running 'gpmc update-cache' to build the cache")
+                
             return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize Google Photos client: {e}")
@@ -103,6 +114,42 @@ class PhotoOrganizer:
         if filename.lower().endswith('.iso'):
             return filename[:-4] + '.mkv'
         return filename
+    
+    def search_media_key_in_gpmc_cache(self, filename: str) -> Optional[str]:
+        """
+        Search for a media key by filename in the gpmc local cache database.
+        
+        This serves as a fallback when the upload_state.json doesn't have the media key.
+        
+        Args:
+            filename: The filename to search for
+            
+        Returns:
+            The media_key if found, None otherwise
+        """
+        if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+            return None
+        
+        try:
+            conn = sqlite3.connect(self.gpmc_cache_path)
+            cursor = conn.cursor()
+            
+            # Search for exact filename match
+            cursor.execute(
+                "SELECT media_key FROM remote_media WHERE file_name = ? LIMIT 1",
+                (filename,)
+            )
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                return result[0]
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"  Failed to search gpmc cache for {filename}: {e}")
+            return None
     
     def build_file_to_album_map(self, node: Dict, album_path: str = "") -> None:
         """
@@ -163,7 +210,7 @@ class PhotoOrganizer:
         try:
             if not os.path.exists(state_file):
                 logger.warning(f"⚠️ Upload state file not found: {state_file}")
-                logger.warning("   Will need to search for media by filename")
+                logger.warning("   Will attempt to use gpmc cache as fallback")
                 return
             
             with open(state_file, 'r') as f:
@@ -177,18 +224,28 @@ class PhotoOrganizer:
                 logger.warning("⚠️ Old state format (v1.0) detected - doesn't contain media keys")
                 logger.warning("   The state file needs to be updated to v2.0 format with media keys")
                 logger.warning("   Re-run the upload workflow to generate the new format")
-                logger.warning("   For now, files will be skipped during organization")
+                logger.warning("   Will attempt to use gpmc cache as fallback")
                 return
             
             # If it's a dict mapping path -> info, extract media keys
+            cached_count = 0
+            skipped_none_count = 0
+            
             if isinstance(completed, dict):
                 for file_path, info in completed.items():
                     if isinstance(info, dict) and 'media_key' in info:
                         filename = os.path.basename(file_path)
                         media_key = info['media_key']
                         
+                        # Skip if media_key is None (happens with migrated v1.0 state files)
+                        if media_key is None:
+                            logger.debug(f"  Skipping {filename} - media_key is None (migrated from old state format)")
+                            skipped_none_count += 1
+                            continue
+                        
                         # Store with original filename
                         self.media_cache[filename] = media_key
+                        cached_count += 1
                         
                         # If it's an ISO file, also store the MKV mapping
                         # (ISO files were converted to MKV during upload)
@@ -199,10 +256,15 @@ class PhotoOrganizer:
                         else:
                             logger.debug(f"  Cached: {filename} -> {media_key}")
             
-            logger.info(f"✅ Loaded {len(self.media_cache)} media keys from state file")
+            logger.info(f"✅ Loaded {cached_count} media keys from state file")
+            if skipped_none_count > 0:
+                logger.warning(f"⚠️ Skipped {skipped_none_count} entries with None media_key")
+                logger.warning("   These files were likely uploaded before state v2.0")
+                logger.warning("   Will attempt to find them using gpmc cache fallback")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to load media cache from state: {e}")
+            logger.warning("   Will attempt to use gpmc cache as fallback")
     
     def organize_files(self, dry_run: bool = False) -> tuple:
         """
@@ -252,17 +314,42 @@ class PhotoOrganizer:
             
             # Collect media keys for files in this album
             media_keys = []
+            not_found_count = 0
+            found_in_cache_count = 0
+            found_in_gpmc_count = 0
             
             for filename in filenames:
-                # Check cache first
+                media_key = None
+                
+                # Check upload state cache first
                 if filename in self.media_cache:
                     media_key = self.media_cache[filename]
-                    logger.info(f"   ✓ Found in cache: {filename} -> {media_key}")
-                    media_keys.append(media_key)
+                    found_in_cache_count += 1
+                    logger.debug(f"   ✓ Found in upload state cache: {filename}")
                 else:
-                    logger.warning(f"   ⚠️ Not in cache: {filename}")
-                    logger.warning(f"      (File may not have been uploaded yet or cache is incomplete)")
-                    skipped += 1
+                    # Fallback: search in gpmc cache database
+                    media_key = self.search_media_key_in_gpmc_cache(filename)
+                    if media_key:
+                        found_in_gpmc_count += 1
+                        logger.info(f"   ✓ Found in gpmc cache: {filename} -> {media_key}")
+                        # Cache it for future lookups
+                        self.media_cache[filename] = media_key
+                    else:
+                        logger.warning(f"   ⚠️ Not found in any cache: {filename}")
+                        logger.warning(f"      File may not have been uploaded yet")
+                        not_found_count += 1
+                        skipped += 1
+                
+                if media_key:
+                    media_keys.append(media_key)
+            
+            # Log summary for this album
+            if found_in_cache_count > 0:
+                logger.info(f"   📊 Found {found_in_cache_count} files in upload state cache")
+            if found_in_gpmc_count > 0:
+                logger.info(f"   📊 Found {found_in_gpmc_count} files via gpmc cache fallback")
+            if not_found_count > 0:
+                logger.warning(f"   📊 Could not find {not_found_count} files in any cache")
             
             if not media_keys:
                 logger.warning(f"   ⚠️ No media keys found for album: {album_name}")
