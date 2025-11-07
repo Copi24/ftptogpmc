@@ -13,6 +13,7 @@ Automated script to transfer large 3D movie files (~30GB) from FTP servers to Go
 - 🛡️ **Robust Error Handling**: Retry logic with stall detection and exponential backoff
 - ⏱️ **GitHub Actions**: Runs automatically on schedule or manually via workflow dispatch
 - 🗑️ **Auto Cleanup**: Deletes local files immediately after successful upload to free space
+- 🌲 **FTP Structure Tree**: Generate complete manifest of FTP directory structure (see [FTP_TREE_GENERATOR.md](FTP_TREE_GENERATOR.md))
 
 ## Setup
 
@@ -225,6 +226,26 @@ The state file is:
 - 📤 Uploaded as GitHub Actions artifact (90 day retention)
 - 📥 Downloaded at the start of each workflow run
 - 🔄 Enables seamless resumption across multiple runs
+
+## FTP Structure Tree Generator
+
+Need to organize files in Google Photos based on their original FTP structure? Use the **Generate FTP Structure Tree** workflow to create a complete manifest of the FTP directory structure.
+
+### Quick Start
+
+1. Go to **Actions** → **Generate FTP Structure Tree**
+2. Click **Run workflow**
+3. Download the generated manifest files from artifacts:
+   - `ftp_structure_manifest.json` - Complete structure in JSON format
+   - `ftp_structure_tree.txt` - Human-readable tree visualization
+
+### Use Cases
+
+- **Reorganize Google Photos**: Create albums matching original FTP folders
+- **Track ISO Conversions**: Identify which files were originally ISO (converted to MKV)
+- **Plan File Moves**: See complete structure before reorganizing uploaded files
+
+📖 **Full documentation**: See [FTP_TREE_GENERATOR.md](FTP_TREE_GENERATOR.md) for detailed usage, examples, and API reference.
 
 ## Acknowledgments
 
