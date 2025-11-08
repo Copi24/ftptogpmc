@@ -36,7 +36,19 @@ Since .iso files were converted to .mkv during upload, the script automatically 
 
 ### 3. Media Key Retrieval
 
-The script uses the `upload_state.json` file (from the transfer workflow) to get media keys for uploaded files. This avoids re-uploading or searching for files.
+The script uses a two-tier approach to find media keys:
+
+**Primary**: `upload_state.json` file (from the transfer workflow)
+- Fast lookup using cached media keys
+- Works for files uploaded with the latest workflow (v2.0+)
+
+**Fallback**: gpmc local cache database
+- Searches Google Photos library cache (`~/.cache/gpmc/library.db`)
+- Automatically used when upload state is incomplete or missing
+- Helpful for files uploaded before state v2.0 or with older workflows
+- **Important**: Run `gpmc update-cache` first to ensure the cache is up-to-date
+
+This two-tier approach ensures maximum compatibility and reduces skipped files during organization.
 
 ### 4. Album Creation and Organization
 
@@ -45,6 +57,22 @@ For each folder in the FTP structure:
 - Adds all files from that folder to the album
 
 ## Usage
+
+### Preparation (Recommended)
+
+Before running the organize workflow, especially if you're getting "No media keys found" warnings:
+
+**Update gpmc cache** (optional but highly recommended):
+```bash
+# This updates the local cache with all your Google Photos media
+gpmc update-cache
+```
+
+This command:
+- Downloads metadata for all media in your Google Photos library
+- Stores it in `~/.cache/gpmc/library.db`
+- Enables the organize script to find media keys even if `upload_state.json` is incomplete
+- Takes a few minutes depending on your library size
 
 ### Manual Run (Recommended)
 
@@ -133,18 +161,35 @@ If multiple folders contain files with the same name, they may conflict. The scr
 
 ### "No media keys found for album"
 
-**Cause**: Files in that folder weren't uploaded or aren't in the upload state.
+**Cause**: Files in that folder weren't uploaded or media keys couldn't be found.
 
 **Solution**: 
-1. Check that files were actually uploaded
-2. Verify `upload_state.json` contains the files
-3. Re-run the transfer workflow if needed
+1. Ensure files were uploaded using the transfer workflow
+2. Run `gpmc update-cache` to update the local Google Photos cache
+3. Re-run the organize workflow (it will use the gpmc cache as fallback)
+4. If problems persist, verify `upload_state.json` contains the files with valid media keys
 
-### "Not in cache: filename.mkv"
+**Note**: The script now automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. This helps recover from migrated v1.0 state files or incomplete upload states.
 
-**Cause**: The file hasn't been uploaded yet or the upload state is incomplete.
+### "Not found in any cache: filename.mkv"
 
-**Solution**: Upload the file using the transfer workflow first.
+**Cause**: The file is truly not uploaded yet, or both caches are missing/incomplete.
+
+**Solution**: 
+1. Upload the file using the transfer workflow first
+2. Run `gpmc update-cache` to sync your local cache with Google Photos
+3. Verify the file appears in Google Photos web interface
+4. Re-run the organize workflow
+
+### "Skipped X entries with None media_key"
+
+**Cause**: Your upload state file was migrated from v1.0 format, which didn't store media keys.
+
+**Solution**: 
+This is expected and **not a problem**. The script will automatically use the gpmc cache fallback to find these files. If you want to update your state file:
+1. Run `gpmc update-cache` to ensure the cache is up-to-date
+2. The organize workflow will find the media keys via fallback
+3. Alternatively, re-run uploads with the latest upload workflow (v2.0) to generate proper media keys
 
 ### "Failed to add files to album"
 
