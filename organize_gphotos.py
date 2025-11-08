@@ -58,6 +58,7 @@ class PhotoOrganizer:
         self.file_to_album_map = {}
         self.media_cache = {}  # Cache of filename -> media_key
         self.gpmc_cache_path = None  # Path to gpmc cache database
+        self.gpmc_schema_checked = False  # Track if we've validated the schema
         
     def load_manifest(self) -> bool:
         """Load the FTP structure manifest from JSON file."""
@@ -115,11 +116,82 @@ class PhotoOrganizer:
             return filename[:-4] + '.mkv'
         return filename
     
+    def check_gpmc_cache_schema(self) -> bool:
+        """
+        Check if the gpmc cache database has the expected schema.
+        Logs helpful information if the schema is different.
+        
+        Returns:
+            True if schema looks correct, False otherwise
+        """
+        if self.gpmc_schema_checked:
+            return True
+            
+        if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+            return False
+        
+        try:
+            conn = sqlite3.connect(self.gpmc_cache_path)
+            cursor = conn.cursor()
+            
+            # Check if remote_media table exists
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='remote_media'"
+            )
+            if not cursor.fetchone():
+                logger.warning("⚠️ gpmc cache database doesn't have 'remote_media' table")
+                logger.warning("   Run 'gpmc update-cache' to build the cache properly")
+                conn.close()
+                return False
+            
+            # Check the schema of remote_media table
+            cursor.execute("PRAGMA table_info(remote_media)")
+            columns = cursor.fetchall()
+            column_names = [col[1] for col in columns]
+            
+            logger.debug(f"  gpmc cache columns: {column_names}")
+            
+            # Check for required columns
+            if 'file_name' not in column_names:
+                logger.warning("⚠️ gpmc cache 'remote_media' table missing 'file_name' column")
+                logger.warning(f"   Available columns: {column_names}")
+                logger.warning("   Run 'gpmc update-cache' to rebuild the cache")
+                conn.close()
+                return False
+            
+            if 'media_key' not in column_names:
+                logger.warning("⚠️ gpmc cache 'remote_media' table missing 'media_key' column")
+                logger.warning(f"   Available columns: {column_names}")
+                logger.warning("   Run 'gpmc update-cache' to rebuild the cache")
+                conn.close()
+                return False
+            
+            # Check if there's any data
+            cursor.execute("SELECT COUNT(*) FROM remote_media")
+            count = cursor.fetchone()[0]
+            logger.info(f"✅ gpmc cache has {count} media items")
+            
+            if count == 0:
+                logger.warning("⚠️ gpmc cache is empty - run 'gpmc update-cache' to populate it")
+            
+            conn.close()
+            self.gpmc_schema_checked = True
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to check gpmc cache schema: {e}")
+            return False
+    
     def search_media_key_in_gpmc_cache(self, filename: str) -> Optional[str]:
         """
         Search for a media key by filename in the gpmc local cache database.
         
         This serves as a fallback when the upload_state.json doesn't have the media key.
+        Uses multiple search strategies to find the file:
+        1. Exact filename match (case-sensitive)
+        2. Case-insensitive filename match
+        3. Basename match (filename only, no path)
+        4. LIKE pattern match for files ending with the filename
         
         Args:
             filename: The filename to search for
@@ -128,23 +200,57 @@ class PhotoOrganizer:
             The media_key if found, None otherwise
         """
         if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+            logger.debug(f"  gpmc cache not available at {self.gpmc_cache_path}")
             return None
+        
+        # Check schema on first use
+        if not self.gpmc_schema_checked:
+            if not self.check_gpmc_cache_schema():
+                return None
         
         try:
             conn = sqlite3.connect(self.gpmc_cache_path)
             cursor = conn.cursor()
             
-            # Search for exact filename match
+            # Strategy 1: Exact filename match (case-sensitive)
             cursor.execute(
                 "SELECT media_key FROM remote_media WHERE file_name = ? LIMIT 1",
                 (filename,)
             )
             result = cursor.fetchone()
-            conn.close()
-            
             if result:
+                logger.debug(f"  Found in gpmc cache (exact match): {filename}")
+                conn.close()
                 return result[0]
             
+            # Strategy 2: Case-insensitive match
+            cursor.execute(
+                "SELECT media_key FROM remote_media WHERE LOWER(file_name) = LOWER(?) LIMIT 1",
+                (filename,)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.debug(f"  Found in gpmc cache (case-insensitive): {filename}")
+                conn.close()
+                return result[0]
+            
+            # Strategy 3: Basename match (in case cache has full paths)
+            # This handles cases where the cache might store "/path/to/file.mkv" but we search for "file.mkv"
+            cursor.execute(
+                """SELECT media_key FROM remote_media 
+                   WHERE file_name LIKE '%' || ? 
+                   OR LOWER(file_name) LIKE LOWER('%' || ?)
+                   LIMIT 1""",
+                (filename, filename)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.debug(f"  Found in gpmc cache (pattern match): {filename}")
+                conn.close()
+                return result[0]
+            
+            logger.debug(f"  Not found in gpmc cache after trying all strategies: {filename}")
+            conn.close()
             return None
             
         except Exception as e:
@@ -293,6 +399,13 @@ class PhotoOrganizer:
         # Load media cache from upload state (if available)
         self.load_media_cache_from_state()
         
+        # Check gpmc cache schema early (if it exists)
+        if self.gpmc_cache_path and self.gpmc_cache_path.exists():
+            logger.info("=" * 80)
+            logger.info("🔍 CHECKING GPMC CACHE DATABASE")
+            logger.info("=" * 80)
+            self.check_gpmc_cache_schema()
+        
         successful = 0
         failed = 0
         skipped = 0
@@ -336,7 +449,10 @@ class PhotoOrganizer:
                         self.media_cache[filename] = media_key
                     else:
                         logger.warning(f"   ⚠️ Not found in any cache: {filename}")
-                        logger.warning(f"      File may not have been uploaded yet")
+                        if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+                            logger.warning(f"      gpmc cache database not found - run 'gpmc update-cache' to build it")
+                        else:
+                            logger.warning(f"      File may not have been uploaded yet, or filename mismatch in cache")
                         not_found_count += 1
                         skipped += 1
                 

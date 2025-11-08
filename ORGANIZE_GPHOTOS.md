@@ -42,13 +42,18 @@ The script uses a two-tier approach to find media keys:
 - Fast lookup using cached media keys
 - Works for files uploaded with the latest workflow (v2.0+)
 
-**Fallback**: gpmc local cache database
+**Fallback**: gpmc local cache database (v2.0+ with improved search)
 - Searches Google Photos library cache (`~/.cache/gpmc/library.db`)
 - Automatically used when upload state is incomplete or missing
 - Helpful for files uploaded before state v2.0 or with older workflows
 - **Important**: Run `gpmc update-cache` first to ensure the cache is up-to-date
+- **New**: Uses multiple search strategies:
+  - Exact filename match (case-sensitive)
+  - Case-insensitive matching (handles `Movie.mkv` vs `movie.MKV`)
+  - Pattern matching (handles `/path/to/file.mkv` vs `file.mkv`)
+- **New**: Validates cache schema and reports issues clearly
 
-This two-tier approach ensures maximum compatibility and reduces skipped files during organization.
+This two-tier approach with improved search ensures maximum compatibility and reduces skipped files during organization.
 
 ### 4. Album Creation and Organization
 
@@ -169,7 +174,12 @@ If multiple folders contain files with the same name, they may conflict. The scr
 3. Re-run the organize workflow (it will use the gpmc cache as fallback)
 4. If problems persist, verify `upload_state.json` contains the files with valid media keys
 
-**Note**: The script now automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. This helps recover from migrated v1.0 state files or incomplete upload states.
+**Note**: The script now automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. The improved search uses multiple strategies:
+- Exact filename match (case-sensitive)
+- Case-insensitive matching
+- Pattern matching (handles full paths vs basenames)
+
+This helps recover from migrated v1.0 state files, incomplete upload states, and filename case mismatches.
 
 ### "Not found in any cache: filename.mkv"
 
@@ -180,6 +190,11 @@ If multiple folders contain files with the same name, they may conflict. The scr
 2. Run `gpmc update-cache` to sync your local cache with Google Photos
 3. Verify the file appears in Google Photos web interface
 4. Re-run the organize workflow
+
+**Improved Diagnostics**: The script now provides more specific error messages:
+- If gpmc cache database is missing, it will suggest running `gpmc update-cache`
+- If the cache exists but is empty, it will warn you
+- If the schema is incorrect, it will show available columns
 
 ### "Skipped X entries with None media_key"
 
