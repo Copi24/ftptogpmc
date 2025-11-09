@@ -57,9 +57,51 @@ This two-tier approach with improved search ensures maximum compatibility and re
 
 ### 4. Album Creation and Organization
 
+**New in v2.1**: Enhanced with partial album support and detailed diagnostics.
+
 For each folder in the FTP structure:
 - Creates an album with the folder path as the name
 - Adds all files from that folder to the album
+- **If some files are missing** (partial albums enabled, default):
+  - Creates album with available files
+  - Logs which files are missing with detailed diagnostics
+  - Missing files can be added later by re-running the script
+- **If too many files are missing** (below threshold):
+  - Skips the album
+  - Logs detailed report of missing files
+  - Provides actionable recommendations
+
+### 5. Enhanced Logging and Diagnostics (v2.1)
+
+The script now provides comprehensive logging for better troubleshooting:
+
+**Album-level statistics**:
+```
+📊 ALBUM CACHE SUMMARY:
+   Total files in album: 5
+   Found in upload state cache: 3
+   Found via gpmc cache fallback: 1
+   Missing from all caches: 1
+   Cache hit rate: 80.0%
+```
+
+**Per-file diagnostics** when files are missing:
+```
+⚠️ Not found in any cache: filename.mkv
+   📋 DIAGNOSIS: File not found in either cache source
+      - upload_state.json: No entry for filename.mkv
+      - gpmc cache: No match after trying all search strategies
+   🔧 POSSIBLE CAUSES:
+      1. File has not been uploaded to Google Photos yet
+      2. Filename mismatch (check for special characters, encoding issues)
+      3. Cache is out of sync - run 'gpmc update-cache' to refresh
+```
+
+**Missing Files Report** at end of run:
+- Lists all albums with missing files
+- Shows which files are missing from each album
+- Indicates whether album was created partially or skipped
+- Provides recommended actions to resolve issues
 
 ## Usage
 
@@ -79,15 +121,22 @@ This command:
 - Enables the organize script to find media keys even if `upload_state.json` is incomplete
 - Takes a few minutes depending on your library size
 
+**New in v2.1**: The script now provides much better diagnostics and can create partial albums, so even if some files are missing, organization can proceed with available files.
+
 ### Manual Run (Recommended)
 
 1. Go to **Actions** → **Organize Google Photos Files**
 2. Click **Run workflow**
-3. Choose run mode:
+3. Choose run mode and options:
    - **Dry run: true** - Preview what will be done (no changes)
    - **Dry run: false** - Actually organize files
+   - **Partial albums: true** (default) - Create albums even if some files are missing
+   - **Partial albums: false** - Only create albums if all files are found
+   - **Min files threshold: 1** (default) - Minimum files required to create an album
 4. Monitor the logs
 5. Download results from artifacts
+
+**New in v2.1**: The workflow now supports partial album creation, allowing you to organize available files while missing files can be added later. This significantly reduces skipped albums and provides better visibility into what's missing.
 
 ### First Run - Dry Run
 
@@ -108,9 +157,43 @@ Once you've verified the dry run output, run again with:
 
 ```yaml
 dry_run: false
+partial_albums: true  # Create albums even if some files are missing (recommended)
+min_files_threshold: 1  # Minimum files to create an album
 ```
 
 This will actually create albums and move files.
+
+### Command Line Options (Local/Manual Runs)
+
+When running the script locally, you can use these command line options:
+
+```bash
+# Basic dry run
+python3 organize_gphotos.py --dry-run
+
+# Disable partial albums (only create complete albums)
+python3 organize_gphotos.py --no-partial-albums
+
+# Set minimum files threshold
+python3 organize_gphotos.py --min-files=5
+
+# Combined options
+python3 organize_gphotos.py --dry-run --min-files=3
+
+# Live run with partial albums (default behavior)
+python3 organize_gphotos.py
+```
+
+**Options**:
+- `--dry-run`: Preview mode - show what would be done without making changes
+- `--no-partial-albums`: Disable partial album creation (skip albums with any missing files)
+- `--min-files=N`: Set minimum number of files required to create an album (default: 1)
+
+**Partial Albums (New in v2.1)**:
+- Enabled by default - albums are created even if some files are missing
+- Missing files can be added later by re-running the script
+- Provides detailed Missing Files Report showing what's missing and why
+- Can be disabled with `--no-partial-albums` to only create complete albums
 
 ## Example Structure
 
@@ -174,6 +257,11 @@ If multiple folders contain files with the same name, they may conflict. The scr
 3. Re-run the organize workflow (it will use the gpmc cache as fallback)
 4. If problems persist, verify `upload_state.json` contains the files with valid media keys
 
+**New in v2.1**: The script now provides detailed diagnostics for each missing file, showing:
+- Which caches were checked (upload_state.json, gpmc cache)
+- Why the file wasn't found in each cache
+- Specific recommended actions based on the failure mode
+
 **Note**: The script now automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. The improved search uses multiple strategies:
 - Exact filename match (case-sensitive)
 - Case-insensitive matching
@@ -190,6 +278,18 @@ This helps recover from migrated v1.0 state files, incomplete upload states, and
 2. Run `gpmc update-cache` to sync your local cache with Google Photos
 3. Verify the file appears in Google Photos web interface
 4. Re-run the organize workflow
+
+**New in v2.1**: When a file is missing, the script now shows detailed diagnostics:
+```
+⚠️ Not found in any cache: filename.mkv
+   📋 DIAGNOSIS: File not found in either cache source
+      - upload_state.json: No entry for filename.mkv
+      - gpmc cache: No match after trying all search strategies
+   🔧 POSSIBLE CAUSES:
+      1. File has not been uploaded to Google Photos yet
+      2. Filename mismatch (check for special characters, encoding issues)
+      3. Cache is out of sync - run 'gpmc update-cache' to refresh
+```
 
 **Improved Diagnostics**: The script now provides more specific error messages:
 - If gpmc cache database is missing, it will suggest running `gpmc update-cache`
@@ -214,6 +314,54 @@ This is expected and **not a problem**. The script will automatically use the gp
 1. Verify `GP_AUTH_DATA` secret is still valid
 2. Check logs for specific error messages
 3. Try running again (may be temporary API issue)
+
+### "Partial album: X/Y files missing"
+
+**New in v2.1**: This is a normal informational message when partial albums are enabled (default).
+
+**What it means**: The album will be created with the files that are available, and missing files can be added later.
+
+**To change behavior**:
+- Disable partial albums: Set `partial_albums: false` in workflow inputs or use `--no-partial-albums` flag
+- Set minimum threshold: Set `min_files_threshold: N` in workflow inputs or use `--min-files=N` flag
+
+### Missing Files Report
+
+**New in v2.1**: At the end of each run, a detailed Missing Files Report is generated showing:
+- Which albums have missing files
+- How many files are missing from each album
+- Specific filenames that couldn't be found
+- Whether the album was created partially or skipped entirely
+- Recommended actions to resolve the issues
+
+Example:
+```
+📋 MISSING FILES REPORT
+Albums with missing files: 2
+
+Album: Blockbuster Movies/Avatar (2009)
+  Status: PARTIAL - Some files added
+  Total files: 5
+  Found files: 3
+  Missing files (2):
+    - Avatar.Extras.mkv
+    - Avatar.BehindTheScenes.mkv
+
+Album: Blockbuster Movies/Gravity (2013)
+  Status: SKIPPED - No files found
+  Total files: 3
+  Missing files (3):
+    - Gravity.3D.mkv
+    - Gravity.2D.mkv
+    - Gravity.Extras.mkv
+
+🔧 RECOMMENDED ACTIONS
+To resolve missing files:
+  1. Run 'gpmc update-cache' to refresh the Google Photos cache
+  2. Verify files were successfully uploaded (check upload_state.json)
+  3. Re-run this organization script to pick up newly found files
+  4. Check for filename mismatches (special characters, encoding)
+```
 
 ## State Files
 
