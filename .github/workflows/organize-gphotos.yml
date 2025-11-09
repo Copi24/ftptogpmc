@@ -8,6 +8,16 @@ on:
         required: false
         type: boolean
         default: true
+      partial_albums:
+        description: 'Create albums even if some files are missing (recommended)'
+        required: false
+        type: boolean
+        default: true
+      min_files_threshold:
+        description: 'Minimum number of files required to create an album'
+        required: false
+        type: number
+        default: 1
 
 env:
   PYTHONUNBUFFERED: 1
@@ -110,14 +120,34 @@ jobs:
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
         run: |
+          # Build command line arguments
+          ARGS=""
+          
           # Determine if dry run mode
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             echo "🔍 Running in DRY RUN mode - no changes will be made"
-            python3 organize_gphotos.py --dry-run
+            ARGS="$ARGS --dry-run"
           else
             echo "🚀 Running in LIVE mode - files will be organized"
-            python3 organize_gphotos.py
           fi
+          
+          # Determine if partial albums are disabled
+          if [ "${{ github.event.inputs.partial_albums }}" = "false" ]; then
+            echo "⚠️ Partial albums disabled - only complete albums will be created"
+            ARGS="$ARGS --no-partial-albums"
+          else
+            echo "✅ Partial albums enabled - will create albums even if some files are missing"
+          fi
+          
+          # Add min files threshold
+          MIN_FILES="${{ github.event.inputs.min_files_threshold }}"
+          if [ -n "$MIN_FILES" ] && [ "$MIN_FILES" != "1" ]; then
+            echo "⚙️ Minimum files threshold: $MIN_FILES"
+            ARGS="$ARGS --min-files=$MIN_FILES"
+          fi
+          
+          # Run the script
+          python3 organize_gphotos.py $ARGS
         continue-on-error: false
       
       - name: Upload logs
@@ -141,18 +171,41 @@ jobs:
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Partial albums:** ${{ github.event.inputs.partial_albums }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Min files threshold:** ${{ github.event.inputs.min_files_threshold }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "organize_gphotos.log" ]; then
             # Extract statistics from log file
             SUCCESSFUL=$(grep -c "✅ Successfully added" organize_gphotos.log || echo "0")
             FAILED=$(grep -c "❌ Failed to add" organize_gphotos.log || echo "0")
-            SKIPPED=$(grep -c "⚠️ Not in cache" organize_gphotos.log || echo "0")
+            SKIPPED=$(grep -c "⚠️ Not found in any cache" organize_gphotos.log || echo "0")
+            PARTIAL=$(grep -c "⚠️ Partial album:" organize_gphotos.log || echo "0")
             
             echo "## Results" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Successful: $SUCCESSFUL albums" >> $GITHUB_STEP_SUMMARY
             echo "- ❌ Failed: $FAILED albums" >> $GITHUB_STEP_SUMMARY
             echo "- ⏭️ Skipped: $SKIPPED files" >> $GITHUB_STEP_SUMMARY
+            if [ "$PARTIAL" -gt "0" ]; then
+              echo "- ⚠️ Partial albums: $PARTIAL (some files missing)" >> $GITHUB_STEP_SUMMARY
+            fi
             echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Check for missing files report
+            if grep -q "MISSING FILES REPORT" organize_gphotos.log; then
+              echo "## Missing Files Detected" >> $GITHUB_STEP_SUMMARY
+              echo "⚠️ Some files could not be found in cache. See detailed log for:" >> $GITHUB_STEP_SUMMARY
+              echo "- Which albums have missing files" >> $GITHUB_STEP_SUMMARY
+              echo "- Specific filenames that are missing" >> $GITHUB_STEP_SUMMARY
+              echo "- Recommended actions to resolve the issues" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Quick Actions" >> $GITHUB_STEP_SUMMARY
+              echo "1. Run \`gpmc update-cache\` to refresh the Google Photos cache" >> $GITHUB_STEP_SUMMARY
+              echo "2. Verify files were successfully uploaded (check upload_state.json)" >> $GITHUB_STEP_SUMMARY
+              echo "3. Re-run this workflow to pick up newly found files" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
             
             if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
               echo "ℹ️ Run again without dry-run mode to actually organize files" >> $GITHUB_STEP_SUMMARY

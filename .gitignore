@@ -60,3 +60,7 @@ rclone.conf
 # GitHub Actions artifacts
 *.zip
 
+# Test and demo files (for development only)
+test_organize_validation.py
+demo_diagnostics.py
+
