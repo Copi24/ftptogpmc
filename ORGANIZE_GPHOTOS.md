@@ -105,23 +105,23 @@ The script now provides comprehensive logging for better troubleshooting:
 
 ## Usage
 
-### Preparation (Recommended)
+### Automatic Cache Update (New in v2.2)
 
-Before running the organize workflow, especially if you're getting "No media keys found" warnings:
+**No preparation required!** The organize workflow now automatically updates the Google Photos cache before organizing files. This ensures that:
+- All files present in Google Photos are detected, even if `upload_state.json` is missing or incomplete
+- Files uploaded with older workflows (v1.0) are properly found and organized
+- No manual cache updates are needed before running the workflow
 
-**Update gpmc cache** (optional but highly recommended):
-```bash
-# This updates the local cache with all your Google Photos media
-gpmc update-cache
+The cache update happens automatically as the first step of the organize workflow and takes a few minutes depending on your library size.
+
+**For local runs**: If running the script locally (not via GitHub Actions), you can manually update the cache before organizing:
+```python
+from gpmc import Client
+client = Client(auth_data="your_auth_data")
+client.update_cache(show_progress=True)
 ```
 
-This command:
-- Downloads metadata for all media in your Google Photos library
-- Stores it in `~/.cache/gpmc/library.db`
-- Enables the organize script to find media keys even if `upload_state.json` is incomplete
-- Takes a few minutes depending on your library size
-
-**New in v2.1**: The script now provides much better diagnostics and can create partial albums, so even if some files are missing, organization can proceed with available files.
+**New in v2.1**: The script provides comprehensive diagnostics and supports partial album creation, allowing organization to proceed even when some files are missing.
 
 ### Manual Run (Recommended)
 
@@ -133,10 +133,12 @@ This command:
    - **Partial albums: true** (default) - Create albums even if some files are missing
    - **Partial albums: false** - Only create albums if all files are found
    - **Min files threshold: 1** (default) - Minimum files required to create an album
-4. Monitor the logs
+4. Monitor the logs - the cache will be updated automatically before organizing
 5. Download results from artifacts
 
-**New in v2.1**: The workflow now supports partial album creation, allowing you to organize available files while missing files can be added later. This significantly reduces skipped albums and provides better visibility into what's missing.
+**What's New**:
+- **v2.2**: Automatic cache update eliminates manual preparation steps
+- **v2.1**: Partial album support and detailed diagnostics for missing files
 
 ### First Run - Dry Run
 
@@ -251,18 +253,20 @@ If multiple folders contain files with the same name, they may conflict. The scr
 
 **Cause**: Files in that folder weren't uploaded or media keys couldn't be found.
 
-**Solution**: 
-1. Ensure files were uploaded using the transfer workflow
-2. Run `gpmc update-cache` to update the local Google Photos cache
-3. Re-run the organize workflow (it will use the gpmc cache as fallback)
-4. If problems persist, verify `upload_state.json` contains the files with valid media keys
+**Solution (v2.2+)**: 
+The workflow now automatically updates the Google Photos cache before organizing, so this issue should be rare. If it still occurs:
+1. Verify files were successfully uploaded to Google Photos (check the web interface)
+2. Re-run the organize workflow - the automatic cache update will detect newly uploaded files
+3. Check the logs for specific diagnostic messages about why files weren't found
 
-**New in v2.1**: The script now provides detailed diagnostics for each missing file, showing:
+**For older versions**: Manually update the cache or upgrade to v2.2+.
+
+**New in v2.1**: The script provides detailed diagnostics for each missing file, showing:
 - Which caches were checked (upload_state.json, gpmc cache)
 - Why the file wasn't found in each cache
 - Specific recommended actions based on the failure mode
 
-**Note**: The script now automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. The improved search uses multiple strategies:
+**Note**: The script automatically falls back to searching the gpmc cache database when files are not found in `upload_state.json`. The improved search uses multiple strategies:
 - Exact filename match (case-sensitive)
 - Case-insensitive matching
 - Pattern matching (handles full paths vs basenames)
@@ -271,15 +275,16 @@ This helps recover from migrated v1.0 state files, incomplete upload states, and
 
 ### "Not found in any cache: filename.mkv"
 
-**Cause**: The file is truly not uploaded yet, or both caches are missing/incomplete.
+**Cause**: The file is truly not uploaded yet.
 
-**Solution**: 
-1. Upload the file using the transfer workflow first
-2. Run `gpmc update-cache` to sync your local cache with Google Photos
-3. Verify the file appears in Google Photos web interface
-4. Re-run the organize workflow
+**Solution (v2.2+)**: 
+1. Verify the file appears in Google Photos web interface
+2. Re-run the organize workflow - the automatic cache update should detect it
+3. If the file is still not found after automatic cache update, check for:
+   - Filename mismatches (special characters, encoding issues)
+   - Files that failed to upload (check transfer workflow logs)
 
-**New in v2.1**: When a file is missing, the script now shows detailed diagnostics:
+**New in v2.1**: When a file is missing, the script shows detailed diagnostics:
 ```
 ⚠️ Not found in any cache: filename.mkv
    📋 DIAGNOSIS: File not found in either cache source
@@ -288,23 +293,21 @@ This helps recover from migrated v1.0 state files, incomplete upload states, and
    🔧 POSSIBLE CAUSES:
       1. File has not been uploaded to Google Photos yet
       2. Filename mismatch (check for special characters, encoding issues)
-      3. Cache is out of sync - run 'gpmc update-cache' to refresh
+      3. Cache is out of sync - automatic update will fix this
 ```
-
-**Improved Diagnostics**: The script now provides more specific error messages:
-- If gpmc cache database is missing, it will suggest running `gpmc update-cache`
-- If the cache exists but is empty, it will warn you
-- If the schema is incorrect, it will show available columns
 
 ### "Skipped X entries with None media_key"
 
 **Cause**: Your upload state file was migrated from v1.0 format, which didn't store media keys.
 
-**Solution**: 
-This is expected and **not a problem**. The script will automatically use the gpmc cache fallback to find these files. If you want to update your state file:
-1. Run `gpmc update-cache` to ensure the cache is up-to-date
-2. The organize workflow will find the media keys via fallback
-3. Alternatively, re-run uploads with the latest upload workflow (v2.0) to generate proper media keys
+**Solution (v2.2+)**: 
+This is expected and **not a problem**. The workflow automatically updates the gpmc cache, which will find all these files. The organization should proceed successfully with the automatic cache fallback.
+
+**What happens**:
+1. Workflow detects old state format with None media_keys
+2. Automatically updates gpmc cache before organizing
+3. Falls back to gpmc cache for all files with None media_keys
+4. Files are organized successfully using the cache
 
 ### "Failed to add files to album"
 
