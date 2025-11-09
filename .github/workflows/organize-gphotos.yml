@@ -116,6 +116,47 @@ jobs:
             echo "Upload files first using 'FTP to Google Photos Transfer' workflow"
           fi
       
+      - name: Update Google Photos cache
+        env:
+          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
+        run: |
+          echo "🔄 Updating Google Photos cache to enable file detection..."
+          echo "This may take a few minutes depending on library size"
+          
+          # Create a simple Python script to update the cache
+          cat > update_cache.py << 'EOF'
+          import sys
+          import os
+          from gpmc import Client
+          
+          # Get auth data
+          auth_data = os.environ.get('GP_AUTH_DATA')
+          if not auth_data:
+              print("❌ GP_AUTH_DATA not set")
+              sys.exit(1)
+          
+          # Initialize client
+          print("📡 Connecting to Google Photos...")
+          client = Client(auth_data=auth_data)
+          
+          # Update cache
+          print("🔄 Downloading library metadata...")
+          client.update_cache(show_progress=True)
+          
+          print("✅ Cache updated successfully")
+          EOF
+          
+          python3 update_cache.py
+          
+          # Verify cache was created
+          CACHE_PATH="$HOME/.cache/gpmc/library.db"
+          if [ -f "$CACHE_PATH" ]; then
+            CACHE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)
+            echo "✅ Cache created at $CACHE_PATH (size: $CACHE_SIZE)"
+          else
+            echo "⚠️ Cache file not found at expected location"
+          fi
+      
       - name: Run organization script
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
