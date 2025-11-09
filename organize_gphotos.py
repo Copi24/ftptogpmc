@@ -372,12 +372,15 @@ class PhotoOrganizer:
             logger.warning(f"⚠️ Failed to load media cache from state: {e}")
             logger.warning("   Will attempt to use gpmc cache as fallback")
     
-    def organize_files(self, dry_run: bool = False) -> tuple:
+    def organize_files(self, dry_run: bool = False, partial_albums: bool = True, 
+                      min_files_threshold: int = 1) -> tuple:
         """
         Organize uploaded files into albums based on manifest structure.
         
         Args:
             dry_run: If True, only log what would be done without making changes
+            partial_albums: If True, create albums even if some files are missing
+            min_files_threshold: Minimum number of files required to create an album
             
         Returns:
             Tuple of (successful_count, failed_count, skipped_count)
@@ -410,6 +413,9 @@ class PhotoOrganizer:
         failed = 0
         skipped = 0
         
+        # Track missing files for final summary
+        missing_files_report = []
+        
         # Process each album
         for album_name, filenames in sorted(album_to_files.items()):
             logger.info("=" * 80)
@@ -430,6 +436,7 @@ class PhotoOrganizer:
             not_found_count = 0
             found_in_cache_count = 0
             found_in_gpmc_count = 0
+            missing_files_list = []
             
             for filename in filenames:
                 media_key = None
@@ -449,28 +456,97 @@ class PhotoOrganizer:
                         self.media_cache[filename] = media_key
                     else:
                         logger.warning(f"   ⚠️ Not found in any cache: {filename}")
-                        if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
-                            logger.warning(f"      gpmc cache database not found - run 'gpmc update-cache' to build it")
+                        
+                        # Provide specific diagnostic information
+                        has_upload_state = os.path.exists('upload_state.json')
+                        has_gpmc_cache = self.gpmc_cache_path and self.gpmc_cache_path.exists()
+                        
+                        if not has_upload_state and not has_gpmc_cache:
+                            logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
+                            logger.warning(f"         - upload_state.json: Not found")
+                            logger.warning(f"         - gpmc cache: Not found")
+                            logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
+                        elif not has_upload_state and has_gpmc_cache:
+                            logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
+                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
+                        elif has_upload_state and not has_gpmc_cache:
+                            logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
+                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
                         else:
-                            logger.warning(f"      File may not have been uploaded yet, or filename mismatch in cache")
+                            logger.warning(f"      📋 DIAGNOSIS: File not found in either cache source")
+                            logger.warning(f"         - upload_state.json: No entry for {filename}")
+                            logger.warning(f"         - gpmc cache: No match after trying all search strategies")
+                            logger.warning(f"      🔧 POSSIBLE CAUSES:")
+                            logger.warning(f"         1. File has not been uploaded to Google Photos yet")
+                            logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
+                            logger.warning(f"         3. Cache is out of sync - run 'gpmc update-cache' to refresh")
+                        
                         not_found_count += 1
                         skipped += 1
+                        missing_files_list.append(filename)
                 
                 if media_key:
                     media_keys.append(media_key)
             
-            # Log summary for this album
-            if found_in_cache_count > 0:
-                logger.info(f"   📊 Found {found_in_cache_count} files in upload state cache")
-            if found_in_gpmc_count > 0:
-                logger.info(f"   📊 Found {found_in_gpmc_count} files via gpmc cache fallback")
-            if not_found_count > 0:
-                logger.warning(f"   📊 Could not find {not_found_count} files in any cache")
+            # Calculate cache hit rate for this album
+            total_files = len(filenames)
+            found_files = found_in_cache_count + found_in_gpmc_count
+            cache_hit_rate = (found_files / total_files * 100) if total_files > 0 else 0
             
+            # Log summary for this album
+            logger.info(f"   📊 ALBUM CACHE SUMMARY:")
+            logger.info(f"      Total files in album: {total_files}")
+            logger.info(f"      Found in upload state cache: {found_in_cache_count}")
+            logger.info(f"      Found via gpmc cache fallback: {found_in_gpmc_count}")
+            logger.info(f"      Missing from all caches: {not_found_count}")
+            logger.info(f"      Cache hit rate: {cache_hit_rate:.1f}%")
+            
+            # Handle missing files based on partial_albums setting
             if not media_keys:
                 logger.warning(f"   ⚠️ No media keys found for album: {album_name}")
+                logger.warning(f"      All {total_files} files are missing from cache")
                 logger.warning(f"      Skipping album (files may not be uploaded yet)")
+                
+                # Add to missing files report
+                missing_files_report.append({
+                    'album': album_name,
+                    'total_files': total_files,
+                    'missing_files': missing_files_list,
+                    'status': 'SKIPPED - No files found'
+                })
                 continue
+            elif not_found_count > 0:
+                if partial_albums and len(media_keys) >= min_files_threshold:
+                    logger.warning(f"   ⚠️ Partial album: {not_found_count}/{total_files} files missing")
+                    logger.warning(f"      Creating album with {len(media_keys)} available files")
+                    logger.warning(f"      Missing files can be added later when available:")
+                    for missing_file in missing_files_list[:10]:  # Show first 10
+                        logger.warning(f"         - {missing_file}")
+                    if len(missing_files_list) > 10:
+                        logger.warning(f"         ... and {len(missing_files_list) - 10} more")
+                    
+                    # Add to missing files report
+                    missing_files_report.append({
+                        'album': album_name,
+                        'total_files': total_files,
+                        'found_files': len(media_keys),
+                        'missing_files': missing_files_list,
+                        'status': 'PARTIAL - Some files added'
+                    })
+                else:
+                    logger.warning(f"   ⚠️ Too many files missing: {not_found_count}/{total_files}")
+                    logger.warning(f"      Only {len(media_keys)} files found (threshold: {min_files_threshold})")
+                    logger.warning(f"      Skipping album - enable partial_albums or lower threshold to proceed")
+                    
+                    # Add to missing files report
+                    missing_files_report.append({
+                        'album': album_name,
+                        'total_files': total_files,
+                        'found_files': len(media_keys),
+                        'missing_files': missing_files_list,
+                        'status': f'SKIPPED - Below threshold ({min_files_threshold})'
+                    })
+                    continue
             
             # Add media to album
             try:
@@ -495,6 +571,37 @@ class PhotoOrganizer:
                 logger.error(f"   ❌ Error adding files to album: {e}")
                 failed += len(media_keys)
         
+        # Generate detailed missing files report
+        if missing_files_report:
+            logger.info("=" * 80)
+            logger.info("📋 MISSING FILES REPORT")
+            logger.info("=" * 80)
+            logger.info(f"Albums with missing files: {len(missing_files_report)}")
+            logger.info("")
+            
+            for report in missing_files_report:
+                logger.info(f"Album: {report['album']}")
+                logger.info(f"  Status: {report['status']}")
+                logger.info(f"  Total files: {report['total_files']}")
+                if 'found_files' in report:
+                    logger.info(f"  Found files: {report['found_files']}")
+                logger.info(f"  Missing files ({len(report['missing_files'])}):")
+                for missing_file in report['missing_files'][:5]:  # Show first 5
+                    logger.info(f"    - {missing_file}")
+                if len(report['missing_files']) > 5:
+                    logger.info(f"    ... and {len(report['missing_files']) - 5} more")
+                logger.info("")
+            
+            logger.info("=" * 80)
+            logger.info("🔧 RECOMMENDED ACTIONS")
+            logger.info("=" * 80)
+            logger.info("To resolve missing files:")
+            logger.info("  1. Run 'gpmc update-cache' to refresh the Google Photos cache")
+            logger.info("  2. Verify files were successfully uploaded (check upload_state.json)")
+            logger.info("  3. Re-run this organization script to pick up newly found files")
+            logger.info("  4. Check for filename mismatches (special characters, encoding)")
+            logger.info("=" * 80)
+        
         return successful, failed, skipped
 
 
@@ -507,9 +614,25 @@ def main():
     
     # Check command line arguments
     dry_run = '--dry-run' in sys.argv
+    partial_albums = '--no-partial-albums' not in sys.argv  # Default: enabled
+    
+    # Parse min files threshold if provided
+    min_files_threshold = 1
+    for arg in sys.argv:
+        if arg.startswith('--min-files='):
+            try:
+                min_files_threshold = int(arg.split('=')[1])
+            except ValueError:
+                logger.warning(f"Invalid --min-files value: {arg}, using default of 1")
+    
     if dry_run:
         logger.info("🔍 DRY RUN MODE - No changes will be made")
         logger.info("=" * 80)
+    
+    logger.info(f"⚙️ Configuration:")
+    logger.info(f"   Partial albums: {'Enabled' if partial_albums else 'Disabled'}")
+    logger.info(f"   Minimum files threshold: {min_files_threshold}")
+    logger.info("=" * 80)
     
     # Get auth data from environment
     auth_data = os.environ.get('GP_AUTH_DATA')
@@ -552,7 +675,11 @@ def main():
     logger.info("=" * 80)
     
     try:
-        successful, failed, skipped = organizer.organize_files(dry_run=dry_run)
+        successful, failed, skipped = organizer.organize_files(
+            dry_run=dry_run,
+            partial_albums=partial_albums,
+            min_files_threshold=min_files_threshold
+        )
         
         logger.info("=" * 80)
         logger.info("📊 ORGANIZATION COMPLETE")
@@ -572,6 +699,10 @@ def main():
         else:
             logger.info("✅ Files have been organized into albums!")
             logger.info("   Check Google Photos to see your organized library")
+            if skipped > 0:
+                logger.info("")
+                logger.info("⚠️ Note: Some files were skipped - see MISSING FILES REPORT above")
+                logger.info("   These files can be added later by re-running this script")
         
     except KeyboardInterrupt:
         logger.info("\n⚠️ Interrupted by user")
