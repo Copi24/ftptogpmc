@@ -96,8 +96,8 @@ jobs:
           if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "null" ]; then
             echo "✅ Found workflow run: $LATEST_RUN"
             
-            # Download the upload-state artifact
-            if gh run download $LATEST_RUN --name upload-state 2>/dev/null; then
+            # Download and extract the upload-state artifact
+            if gh run download $LATEST_RUN --name upload-state --dir . 2>/dev/null; then
               echo "✅ Successfully downloaded upload-state artifact"
               
               if [ -f "upload_state.json" ]; then
