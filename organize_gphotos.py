@@ -257,6 +257,52 @@ class PhotoOrganizer:
             logger.debug(f"  Failed to search gpmc cache for {filename}: {e}")
             return None
     
+    def search_media_key_via_api(self, filename: str) -> Optional[str]:
+        """
+        Search for a media key by querying Google Photos API directly.
+        
+        This is a last-resort fallback when both upload_state.json and gpmc cache fail.
+        Uses the gpmc client to search the library for files matching the filename.
+        
+        Args:
+            filename: The filename to search for
+            
+        Returns:
+            The media_key if found, None otherwise
+        """
+        if not self.client:
+            logger.debug(f"  Client not initialized, cannot search API")
+            return None
+        
+        try:
+            logger.info(f"   🔍 Searching Google Photos API for: {filename}")
+            
+            # Query the library using gpmc's search functionality
+            # The Client object should have access to the library cache
+            # Try to find the file by updating cache and searching again
+            try:
+                # Force a targeted cache update for this specific file
+                # This will query Google Photos API to get latest library state
+                logger.debug(f"   Updating cache to find: {filename}")
+                self.client.update_cache(show_progress=False)
+                
+                # Now search in the freshly updated cache
+                media_key = self.search_media_key_in_gpmc_cache(filename)
+                if media_key:
+                    logger.info(f"   ✅ Found via API cache refresh: {filename} -> {media_key}")
+                    return media_key
+                else:
+                    logger.debug(f"   File still not found after cache refresh: {filename}")
+                    return None
+                    
+            except Exception as e:
+                logger.debug(f"   Failed to update cache for API search: {e}")
+                return None
+                
+        except Exception as e:
+            logger.debug(f"  Failed to search via API for {filename}: {e}")
+            return None
+    
     def build_file_to_album_map(self, node: Dict, album_path: str = "") -> None:
         """
         Recursively build a mapping of files to their album paths.
@@ -447,7 +493,7 @@ class PhotoOrganizer:
                     found_in_cache_count += 1
                     logger.debug(f"   ✓ Found in upload state cache: {filename}")
                 else:
-                    # Fallback: search in gpmc cache database
+                    # Fallback 1: search in gpmc cache database
                     media_key = self.search_media_key_in_gpmc_cache(filename)
                     if media_key:
                         found_in_gpmc_count += 1
@@ -455,35 +501,45 @@ class PhotoOrganizer:
                         # Cache it for future lookups
                         self.media_cache[filename] = media_key
                     else:
-                        logger.warning(f"   ⚠️ Not found in any cache: {filename}")
-                        
-                        # Provide specific diagnostic information
-                        has_upload_state = os.path.exists('upload_state.json')
-                        has_gpmc_cache = self.gpmc_cache_path and self.gpmc_cache_path.exists()
-                        
-                        if not has_upload_state and not has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
-                            logger.warning(f"         - upload_state.json: Not found")
-                            logger.warning(f"         - gpmc cache: Not found")
-                            logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
-                        elif not has_upload_state and has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
-                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
-                        elif has_upload_state and not has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
-                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
+                        # Fallback 2: search via Google Photos API (last resort)
+                        logger.info(f"   ⚠️ Not found in local caches, trying API lookup: {filename}")
+                        media_key = self.search_media_key_via_api(filename)
+                        if media_key:
+                            found_in_gpmc_count += 1
+                            logger.info(f"   ✅ Found via API refresh: {filename} -> {media_key}")
+                            # Cache it for future lookups
+                            self.media_cache[filename] = media_key
                         else:
-                            logger.warning(f"      📋 DIAGNOSIS: File not found in either cache source")
-                            logger.warning(f"         - upload_state.json: No entry for {filename}")
-                            logger.warning(f"         - gpmc cache: No match after trying all search strategies")
-                            logger.warning(f"      🔧 POSSIBLE CAUSES:")
-                            logger.warning(f"         1. File has not been uploaded to Google Photos yet")
-                            logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
-                            logger.warning(f"         3. Cache is out of sync - run 'gpmc update-cache' to refresh")
-                        
-                        not_found_count += 1
-                        skipped += 1
-                        missing_files_list.append(filename)
+                            logger.warning(f"   ⚠️ Not found anywhere (state, cache, API): {filename}")
+                            
+                            # Provide specific diagnostic information
+                            has_upload_state = os.path.exists('upload_state.json')
+                            has_gpmc_cache = self.gpmc_cache_path and self.gpmc_cache_path.exists()
+                            
+                            if not has_upload_state and not has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
+                                logger.warning(f"         - upload_state.json: Not found")
+                                logger.warning(f"         - gpmc cache: Not found")
+                                logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
+                            elif not has_upload_state and has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
+                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
+                            elif has_upload_state and not has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
+                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
+                            else:
+                                logger.warning(f"      📋 DIAGNOSIS: File not found in any source (state, cache, API)")
+                                logger.warning(f"         - upload_state.json: No entry for {filename}")
+                                logger.warning(f"         - gpmc cache: No match after trying all search strategies")
+                                logger.warning(f"         - API refresh: File not found in Google Photos library")
+                                logger.warning(f"      🔧 POSSIBLE CAUSES:")
+                                logger.warning(f"         1. File has not been uploaded to Google Photos yet")
+                                logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
+                                logger.warning(f"         3. File was uploaded but hasn't synced to Google Photos library yet")
+                            
+                            not_found_count += 1
+                            skipped += 1
+                            missing_files_list.append(filename)
                 
                 if media_key:
                     media_keys.append(media_key)
@@ -664,10 +720,9 @@ def main():
         sys.exit(1)
     
     # Initialize Google Photos client
-    if not dry_run:
-        if not organizer.initialize_client():
-            logger.error("❌ Failed to initialize Google Photos client")
-            sys.exit(1)
+    if not organizer.initialize_client():
+        logger.error("❌ Failed to initialize Google Photos client")
+        sys.exit(1)
     
     # Organize files
     logger.info("=" * 80)
