@@ -123,7 +123,7 @@ jobs:
           echo "🔄 Building Google Photos cache to enable file detection..."
           echo "This may take several minutes depending on library size"
           
-          # Create a script to properly build the cache by fetching all media
+          # Create a script to properly build the cache
           cat > build_cache.py << 'EOF'
           import sys
           import os
@@ -142,50 +142,42 @@ jobs:
           
           if cache_exists:
               # Check current cache status
-              conn = sqlite3.connect(cache_path)
-              cursor = conn.cursor()
-              cursor.execute("SELECT COUNT(*) FROM remote_media")
-              count = cursor.fetchone()[0]
-              conn.close()
-              print(f"📊 Existing cache contains {count} items")
+              try:
+                  conn = sqlite3.connect(cache_path)
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT COUNT(*) FROM remote_media")
+                  count = cursor.fetchone()[0]
+                  conn.close()
+                  print(f"📊 Existing cache contains {count} items")
+              except Exception as e:
+                  print(f"⚠️ Could not read existing cache: {e}")
+                  print("   Will rebuild cache from scratch")
+                  cache_exists = False
           else:
               print("🆕 No existing cache found - will build from scratch")
           
-          # Initialize client
+          # Initialize client - this may initialize the cache automatically
           print("📡 Connecting to Google Photos...")
           client = Client(auth_data=auth_data)
+          print("✅ Client connected")
           
-          # The key insight: we need to actually fetch the media to populate the cache
-          # update_cache() only does incremental updates from a sync token
-          # We need to trigger a full fetch by getting all media
-          print("🔄 Fetching all media from Google Photos library...")
-          print("   This will build/update the local cache database")
+          # Update the cache - this should populate it if empty, or update it if it exists
+          # According to gpmc behavior, update_cache() will:
+          # - Initialize cache if it doesn't exist
+          # - Fetch new items if cache exists but is stale
+          # - Use pagination to handle large libraries
+          print("🔄 Updating cache with library metadata...")
+          print("   This operation will fetch all media from your Google Photos library")
+          print("   It may take several minutes for large libraries...")
           
           try:
-              # Fetch all media - this will populate the cache
-              # The show_progress will give us feedback on the operation
-              media_count = 0
-              print("   Retrieving media items (this may take a while)...")
-              
-              # get_media_all() fetches all media and populates the cache
-              # It handles pagination automatically
-              for media in client.get_media_all(show_progress=True):
-                  media_count += 1
-                  # The iteration itself populates the cache
-                  # We don't need to do anything with each item
-                  # But we count them for reporting
-                  if media_count % 100 == 0:
-                      print(f"   Processed {media_count} items...")
-              
-              print(f"✅ Fetched {media_count} total media items")
-              
-          except Exception as e:
-              print(f"❌ Error fetching media: {e}")
-              print("   Falling back to update_cache() method...")
-              # Fallback to update_cache if get_media_all fails
               client.update_cache(show_progress=True)
-          
-          print("✅ Cache build completed")
+              print("✅ Cache update completed")
+          except Exception as e:
+              print(f"❌ Error updating cache: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
           
           # Verify cache contents
           if cache_path.exists():
@@ -195,19 +187,25 @@ jobs:
               count = cursor.fetchone()[0]
               print(f"📊 Cache now contains {count} media items")
               
-              # Show sample filenames to help with debugging
-              cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
-              samples = cursor.fetchall()
-              if samples:
-                  print("📁 Sample filenames in cache:")
-                  for (filename,) in samples:
-                      print(f"   - {filename}")
+              if count == 0:
+                  print("⚠️ WARNING: Cache is empty after update!")
+                  print("   This likely means:")
+                  print("   1. Your Google Photos library is empty, OR")
+                  print("   2. There's an authentication or API issue")
+                  print("   Files cannot be organized if cache is empty")
               else:
-                  print("⚠️ No filenames found in cache!")
+                  # Show sample filenames to help with debugging
+                  cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
+                  samples = cursor.fetchall()
+                  if samples:
+                      print("📁 Sample filenames in cache:")
+                      for (filename,) in samples:
+                          print(f"   - {filename}")
               
               conn.close()
           else:
-              print("❌ Cache file not found after build!")
+              print("❌ Cache file not found after update!")
+              print(f"   Expected location: {cache_path}")
               sys.exit(1)
           EOF
           
