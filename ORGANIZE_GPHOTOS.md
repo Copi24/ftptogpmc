@@ -24,7 +24,7 @@ Before running this workflow, you must:
 The script reads the FTP manifest and builds a map of which files belong in which folders:
 
 - Original structure: `Blockbuster Movies/Avatar (2009)/Avatar.3D.2009.1080p.mkv`
-- Album name: `Blockbuster Movies/Avatar (2009)`
+- Album name: `Avatar (2009)` (leaf folder name only)
 - File to move: `Avatar.3D.2009.1080p.mkv`
 
 ### 2. ISO to MKV Mapping
@@ -342,7 +342,7 @@ Example:
 📋 MISSING FILES REPORT
 Albums with missing files: 2
 
-Album: Blockbuster Movies/Avatar (2009)
+Album: Avatar (2009)
   Status: PARTIAL - Some files added
   Total files: 5
   Found files: 3
@@ -350,7 +350,7 @@ Album: Blockbuster Movies/Avatar (2009)
     - Avatar.Extras.mkv
     - Avatar.BehindTheScenes.mkv
 
-Album: Blockbuster Movies/Gravity (2013)
+Album: Gravity (2013)
   Status: SKIPPED - No files found
   Total files: 3
   Missing files (3):
@@ -450,8 +450,8 @@ This handles the automatic conversion that happened during upload.
 
 Album names are constructed from the folder path:
 - Skip the root folder (`root/`)
-- Use the full path after that
-- Example: `root/Blockbuster Movies/Avatar (2009)` → `Blockbuster Movies/Avatar (2009)`
+- Use the leaf folder name (last component of the path)
+- Example: `root/Blockbuster Movies/Avatar (2009)` → `Avatar (2009)`
 
 ## Example Run
 
