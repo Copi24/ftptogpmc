@@ -260,10 +260,16 @@ class PhotoOrganizer:
     
     def search_media_key_via_api(self, filename: str) -> Optional[str]:
         """
-        Search for a media key by querying Google Photos API directly.
+        Search for a media key by doing an exhaustive search in the gpmc cache database.
         
-        This is a last-resort fallback when both upload_state.json and gpmc cache fail.
-        Uses the gpmc client to search the library for files matching the filename.
+        This is a last-resort fallback when upload_state.json doesn't have the file.
+        The gpmc cache should already be populated by the workflow's "Update Google Photos cache" step.
+        
+        NOTE: We do NOT call update_cache() here because:
+        - The cache was already initialized/updated in the workflow before this script runs
+        - update_cache() only does incremental updates (new changes since last state token)
+        - Files that were already uploaded won't appear in incremental updates
+        - Therefore, calling update_cache() here won't help find already-uploaded files
         
         Args:
             filename: The filename to search for
@@ -271,49 +277,86 @@ class PhotoOrganizer:
         Returns:
             The media_key if found, None otherwise
         """
-        if not self.client:
-            logger.debug(f"  Client not initialized, cannot search API")
+        if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+            logger.debug(f"  gpmc cache not available, cannot search API")
             return None
         
-        try:
-            logger.info(f"   🔍 Searching Google Photos API for: {filename}")
-            
-            # Query the library using gpmc's search functionality
-            # The Client object should have access to the library cache
-            # Try to find the file by updating cache and searching again
-            try:
-                # Force a targeted cache update for this specific file
-                # This will query Google Photos API to get latest library state
-                logger.debug(f"   Updating cache to find: {filename}")
-                
-                # Update cache with retry logic
-                max_retries = 3
-                for attempt in range(1, max_retries + 1):
-                    try:
-                        self.client.update_cache(show_progress=False)
-                        break
-                    except Exception as retry_error:
-                        if attempt < max_retries:
-                            logger.debug(f"   Cache update attempt {attempt} failed, retrying: {retry_error}")
-                            time.sleep(1)  # Wait 1 second before retry
-                        else:
-                            raise
-                
-                # Now search in the freshly updated cache
-                media_key = self.search_media_key_in_gpmc_cache(filename)
-                if media_key:
-                    logger.info(f"   ✅ Found via API cache refresh: {filename} -> {media_key}")
-                    return media_key
-                else:
-                    logger.debug(f"   File still not found after cache refresh: {filename}")
-                    return None
-                    
-            except Exception as e:
-                logger.debug(f"   Failed to update cache for API search: {e}")
+        if not self.gpmc_schema_checked:
+            if not self.check_gpmc_cache_schema():
                 return None
+        
+        try:
+            logger.info(f"   🔍 Searching gpmc cache database for: {filename}")
+            
+            # Do a more exhaustive search in the cache database
+            # Try multiple search strategies to find files with similar names
+            conn = sqlite3.connect(self.gpmc_cache_path)
+            cursor = conn.cursor()
+            
+            # Strategy 1: Exact match (case-sensitive)
+            cursor.execute(
+                "SELECT media_key, file_name FROM remote_media WHERE file_name = ? LIMIT 1",
+                (filename,)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"   ✅ Found exact match: {filename} -> {result[0]}")
+                conn.close()
+                return result[0]
+            
+            # Strategy 2: Case-insensitive match
+            cursor.execute(
+                "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) = LOWER(?) LIMIT 1",
+                (filename,)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"   ✅ Found case-insensitive match: {result[1]} -> {result[0]}")
+                conn.close()
+                return result[0]
+            
+            # Strategy 3: LIKE pattern for files ending with this filename (handles path variations)
+            cursor.execute(
+                "SELECT media_key, file_name FROM remote_media WHERE file_name LIKE ? LIMIT 1",
+                (f"%{filename}",)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"   ✅ Found pattern match: {result[1]} -> {result[0]}")
+                conn.close()
+                return result[0]
+            
+            # Strategy 4: Case-insensitive LIKE for maximum coverage
+            cursor.execute(
+                "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) LIMIT 1",
+                (f"%{filename}",)
+            )
+            result = cursor.fetchone()
+            if result:
+                logger.info(f"   ✅ Found case-insensitive pattern match: {result[1]} -> {result[0]}")
+                conn.close()
+                return result[0]
+            
+            # Strategy 5: Try basename matching (in case stored with different path)
+            # Extract just the base filename without path
+            base_filename = filename.split('/')[-1]
+            if base_filename != filename:
+                cursor.execute(
+                    "SELECT media_key, file_name FROM remote_media WHERE file_name LIKE ? OR LOWER(file_name) LIKE LOWER(?) LIMIT 1",
+                    (f"%/{base_filename}", f"%/{base_filename}")
+                )
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"   ✅ Found basename match: {result[1]} -> {result[0]}")
+                    conn.close()
+                    return result[0]
+            
+            logger.debug(f"   File not found in cache after exhaustive search: {filename}")
+            conn.close()
+            return None
                 
         except Exception as e:
-            logger.debug(f"  Failed to search via API for {filename}: {e}")
+            logger.debug(f"  Failed to search cache database for {filename}: {e}")
             return None
     
     def build_file_to_album_map(self, node: Dict, album_path: str = "") -> None:
@@ -531,15 +574,12 @@ class PhotoOrganizer:
                         # Cache it for future lookups
                         self.media_cache[filename] = media_key
                     else:
-                        # Fallback 2: search via Google Photos API (last resort)
-                        logger.info(f"   ⚠️ Not found in local caches, trying API lookup: {filename}")
-                        # Add small delay to avoid API rate limits (100ms between API calls)
-                        time.sleep(0.1)
+                        # Fallback 2: do exhaustive search in gpmc cache database (last resort)
+                        logger.info(f"   ⚠️ Not found in initial cache lookup, trying exhaustive search: {filename}")
                         media_key = self.search_media_key_via_api(filename)
                         if media_key:
                             found_in_gpmc_count += 1
-                            lookup_method = 'from_api'
-                            logger.info(f"   ✅ Found via API refresh: {filename} -> {media_key}")
+                            lookup_method = 'from_api'  # Keep stat name for backward compatibility
                             # Cache it for future lookups
                             self.media_cache[filename] = media_key
                         else:
@@ -717,7 +757,7 @@ class PhotoOrganizer:
         logger.info(f"Total files processed: {sum(lookup_stats.values())}")
         logger.info(f"  - Found in upload state: {lookup_stats['from_state']}")
         logger.info(f"  - Found via gpmc cache: {lookup_stats['from_cache']}")
-        logger.info(f"  - Found via API refresh: {lookup_stats['from_api']}")
+        logger.info(f"  - Found via exhaustive cache search: {lookup_stats['from_api']}")
         logger.info(f"  - Not found anywhere: {lookup_stats['not_found']}")
         
         if lookup_stats['not_found'] > 0:
