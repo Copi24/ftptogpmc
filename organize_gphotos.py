@@ -18,6 +18,7 @@ import json
 import logging
 import hashlib
 import sqlite3
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
@@ -257,6 +258,64 @@ class PhotoOrganizer:
             logger.debug(f"  Failed to search gpmc cache for {filename}: {e}")
             return None
     
+    def search_media_key_via_api(self, filename: str) -> Optional[str]:
+        """
+        Search for a media key by querying Google Photos API directly.
+        
+        This is a last-resort fallback when both upload_state.json and gpmc cache fail.
+        Uses the gpmc client to search the library for files matching the filename.
+        
+        Args:
+            filename: The filename to search for
+            
+        Returns:
+            The media_key if found, None otherwise
+        """
+        if not self.client:
+            logger.debug(f"  Client not initialized, cannot search API")
+            return None
+        
+        try:
+            logger.info(f"   🔍 Searching Google Photos API for: {filename}")
+            
+            # Query the library using gpmc's search functionality
+            # The Client object should have access to the library cache
+            # Try to find the file by updating cache and searching again
+            try:
+                # Force a targeted cache update for this specific file
+                # This will query Google Photos API to get latest library state
+                logger.debug(f"   Updating cache to find: {filename}")
+                
+                # Update cache with retry logic
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        self.client.update_cache(show_progress=False)
+                        break
+                    except Exception as retry_error:
+                        if attempt < max_retries:
+                            logger.debug(f"   Cache update attempt {attempt} failed, retrying: {retry_error}")
+                            time.sleep(1)  # Wait 1 second before retry
+                        else:
+                            raise
+                
+                # Now search in the freshly updated cache
+                media_key = self.search_media_key_in_gpmc_cache(filename)
+                if media_key:
+                    logger.info(f"   ✅ Found via API cache refresh: {filename} -> {media_key}")
+                    return media_key
+                else:
+                    logger.debug(f"   File still not found after cache refresh: {filename}")
+                    return None
+                    
+            except Exception as e:
+                logger.debug(f"   Failed to update cache for API search: {e}")
+                return None
+                
+        except Exception as e:
+            logger.debug(f"  Failed to search via API for {filename}: {e}")
+            return None
+    
     def build_file_to_album_map(self, node: Dict, album_path: str = "") -> None:
         """
         Recursively build a mapping of files to their album paths.
@@ -336,6 +395,8 @@ class PhotoOrganizer:
             # If it's a dict mapping path -> info, extract media keys
             cached_count = 0
             skipped_none_count = 0
+            migrated_count = 0
+            recovered_keys = {}  # Track files with None keys that we can potentially recover
             
             if isinstance(completed, dict):
                 for file_path, info in completed.items():
@@ -347,6 +408,15 @@ class PhotoOrganizer:
                         if media_key is None:
                             logger.debug(f"  Skipping {filename} - media_key is None (migrated from old state format)")
                             skipped_none_count += 1
+                            migrated_count += 1
+                            # Try to recover the media key from cache
+                            recovered_key = self.search_media_key_in_gpmc_cache(filename)
+                            if recovered_key:
+                                recovered_keys[file_path] = recovered_key
+                                # Store in our memory cache
+                                self.media_cache[filename] = recovered_key
+                                cached_count += 1
+                                logger.info(f"  ✅ Recovered media key for {filename} from cache")
                             continue
                         
                         # Store with original filename
@@ -363,10 +433,14 @@ class PhotoOrganizer:
                             logger.debug(f"  Cached: {filename} -> {media_key}")
             
             logger.info(f"✅ Loaded {cached_count} media keys from state file")
-            if skipped_none_count > 0:
-                logger.warning(f"⚠️ Skipped {skipped_none_count} entries with None media_key")
-                logger.warning("   These files were likely uploaded before state v2.0")
-                logger.warning("   Will attempt to find them using gpmc cache fallback")
+            if len(recovered_keys) > 0:
+                logger.info(f"✅ Recovered {len(recovered_keys)} media keys from cache for migrated files")
+            if skipped_none_count > len(recovered_keys):
+                remaining_none = skipped_none_count - len(recovered_keys)
+                logger.warning(f"⚠️ Still have {remaining_none} entries with None media_key (couldn't recover)")
+                logger.warning(f"   These files were uploaded before state v2.0 and not found in cache")
+                logger.warning(f"   Will attempt to find them using API fallback during organization")
+                logger.warning(f"   💡 TIP: To fix this permanently, re-upload these files or run cache update")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to load media cache from state: {e}")
@@ -413,6 +487,14 @@ class PhotoOrganizer:
         failed = 0
         skipped = 0
         
+        # Track statistics for lookup methods used
+        lookup_stats = {
+            'from_state': 0,
+            'from_cache': 0,
+            'from_api': 0,
+            'not_found': 0
+        }
+        
         # Track missing files for final summary
         missing_files_report = []
         
@@ -422,16 +504,7 @@ class PhotoOrganizer:
             logger.info(f"📁 Processing album: {album_name}")
             logger.info(f"   Files to add: {len(filenames)}")
             
-            if dry_run:
-                logger.info(f"   [DRY RUN] Would create album: {album_name}")
-                for filename in filenames[:5]:  # Show first 5
-                    logger.info(f"   [DRY RUN]   - {filename}")
-                if len(filenames) > 5:
-                    logger.info(f"   [DRY RUN]   ... and {len(filenames) - 5} more")
-                successful += len(filenames)
-                continue
-            
-            # Collect media keys for files in this album
+            # Collect media keys for files in this album (do this even in dry-run to check availability)
             media_keys = []
             not_found_count = 0
             found_in_cache_count = 0
@@ -440,50 +513,71 @@ class PhotoOrganizer:
             
             for filename in filenames:
                 media_key = None
+                lookup_method = None
                 
                 # Check upload state cache first
                 if filename in self.media_cache:
                     media_key = self.media_cache[filename]
                     found_in_cache_count += 1
+                    lookup_method = 'from_state'
                     logger.debug(f"   ✓ Found in upload state cache: {filename}")
                 else:
-                    # Fallback: search in gpmc cache database
+                    # Fallback 1: search in gpmc cache database
                     media_key = self.search_media_key_in_gpmc_cache(filename)
                     if media_key:
                         found_in_gpmc_count += 1
+                        lookup_method = 'from_cache'
                         logger.info(f"   ✓ Found in gpmc cache: {filename} -> {media_key}")
                         # Cache it for future lookups
                         self.media_cache[filename] = media_key
                     else:
-                        logger.warning(f"   ⚠️ Not found in any cache: {filename}")
-                        
-                        # Provide specific diagnostic information
-                        has_upload_state = os.path.exists('upload_state.json')
-                        has_gpmc_cache = self.gpmc_cache_path and self.gpmc_cache_path.exists()
-                        
-                        if not has_upload_state and not has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
-                            logger.warning(f"         - upload_state.json: Not found")
-                            logger.warning(f"         - gpmc cache: Not found")
-                            logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
-                        elif not has_upload_state and has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
-                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
-                        elif has_upload_state and not has_gpmc_cache:
-                            logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
-                            logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
+                        # Fallback 2: search via Google Photos API (last resort)
+                        logger.info(f"   ⚠️ Not found in local caches, trying API lookup: {filename}")
+                        # Add small delay to avoid API rate limits (100ms between API calls)
+                        time.sleep(0.1)
+                        media_key = self.search_media_key_via_api(filename)
+                        if media_key:
+                            found_in_gpmc_count += 1
+                            lookup_method = 'from_api'
+                            logger.info(f"   ✅ Found via API refresh: {filename} -> {media_key}")
+                            # Cache it for future lookups
+                            self.media_cache[filename] = media_key
                         else:
-                            logger.warning(f"      📋 DIAGNOSIS: File not found in either cache source")
-                            logger.warning(f"         - upload_state.json: No entry for {filename}")
-                            logger.warning(f"         - gpmc cache: No match after trying all search strategies")
-                            logger.warning(f"      🔧 POSSIBLE CAUSES:")
-                            logger.warning(f"         1. File has not been uploaded to Google Photos yet")
-                            logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
-                            logger.warning(f"         3. Cache is out of sync - run 'gpmc update-cache' to refresh")
-                        
-                        not_found_count += 1
-                        skipped += 1
-                        missing_files_list.append(filename)
+                            lookup_method = 'not_found'
+                            logger.warning(f"   ⚠️ Not found anywhere (state, cache, API): {filename}")
+                            
+                            # Provide specific diagnostic information
+                            has_upload_state = os.path.exists('upload_state.json')
+                            has_gpmc_cache = self.gpmc_cache_path and self.gpmc_cache_path.exists()
+                            
+                            if not has_upload_state and not has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
+                                logger.warning(f"         - upload_state.json: Not found")
+                                logger.warning(f"         - gpmc cache: Not found")
+                                logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
+                            elif not has_upload_state and has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
+                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
+                            elif has_upload_state and not has_gpmc_cache:
+                                logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
+                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
+                            else:
+                                logger.warning(f"      📋 DIAGNOSIS: File not found in any source (state, cache, API)")
+                                logger.warning(f"         - upload_state.json: No entry for {filename}")
+                                logger.warning(f"         - gpmc cache: No match after trying all search strategies")
+                                logger.warning(f"         - API refresh: File not found in Google Photos library")
+                                logger.warning(f"      🔧 POSSIBLE CAUSES:")
+                                logger.warning(f"         1. File has not been uploaded to Google Photos yet")
+                                logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
+                                logger.warning(f"         3. File was uploaded but hasn't synced to Google Photos library yet")
+                            
+                            not_found_count += 1
+                            skipped += 1
+                            missing_files_list.append(filename)
+                
+                # Track which lookup method was used
+                if lookup_method:
+                    lookup_stats[lookup_method] += 1
                 
                 if media_key:
                     media_keys.append(media_key)
@@ -548,6 +642,20 @@ class PhotoOrganizer:
                     })
                     continue
             
+            # Dry-run mode: show what would be created
+            if dry_run:
+                logger.info(f"   [DRY RUN] Would create album: {album_name}")
+                logger.info(f"   [DRY RUN] Would add {len(media_keys)} files (out of {len(filenames)} total)")
+                if not_found_count > 0:
+                    logger.warning(f"   [DRY RUN] ⚠️ Note: {not_found_count} files missing media keys - won't be added")
+                    logger.warning(f"   [DRY RUN] Missing files:")
+                    for missing_file in missing_files_list[:5]:  # Show first 5 missing
+                        logger.warning(f"   [DRY RUN]   ✗ {missing_file}")
+                    if len(missing_files_list) > 5:
+                        logger.warning(f"   [DRY RUN]   ... and {len(missing_files_list) - 5} more missing")
+                successful += len(media_keys)
+                continue
+            
             # Add media to album
             try:
                 logger.info(f"   📤 Adding {len(media_keys)} files to album: {album_name}")
@@ -601,6 +709,22 @@ class PhotoOrganizer:
             logger.info("  3. Re-run this organization script to pick up newly found files")
             logger.info("  4. Check for filename mismatches (special characters, encoding)")
             logger.info("=" * 80)
+        
+        # Log overall lookup statistics
+        logger.info("=" * 80)
+        logger.info("📊 MEDIA KEY LOOKUP STATISTICS")
+        logger.info("=" * 80)
+        logger.info(f"Total files processed: {sum(lookup_stats.values())}")
+        logger.info(f"  - Found in upload state: {lookup_stats['from_state']}")
+        logger.info(f"  - Found via gpmc cache: {lookup_stats['from_cache']}")
+        logger.info(f"  - Found via API refresh: {lookup_stats['from_api']}")
+        logger.info(f"  - Not found anywhere: {lookup_stats['not_found']}")
+        
+        if lookup_stats['not_found'] > 0:
+            logger.warning(f"⚠️  {lookup_stats['not_found']} files could not be located")
+            logger.warning("   These files may need to be re-uploaded or manually organized")
+        
+        logger.info("=" * 80)
         
         return successful, failed, skipped
 
@@ -664,10 +788,9 @@ def main():
         sys.exit(1)
     
     # Initialize Google Photos client
-    if not dry_run:
-        if not organizer.initialize_client():
-            logger.error("❌ Failed to initialize Google Photos client")
-            sys.exit(1)
+    if not organizer.initialize_client():
+        logger.error("❌ Failed to initialize Google Photos client")
+        sys.exit(1)
     
     # Organize files
     logger.info("=" * 80)

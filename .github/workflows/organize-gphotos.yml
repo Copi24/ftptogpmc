@@ -102,8 +102,8 @@ jobs:
               
               if [ -f "upload_state.json" ]; then
                 echo "✅ Found upload_state.json"
-                # Show stats
-                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); print(f"Completed uploads: {len(completed) if isinstance(completed, dict) else len(completed)}")'
+                # Show basic stats
+                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); print(f"Version: {data.get(\"version\", \"unknown\")}"); print(f"Completed uploads: {len(completed) if isinstance(completed, dict) else len(completed)}"); print(f"With media keys: {sum(1 for info in completed.values() if isinstance(info, dict) and info.get(\"media_key\") is not None) if isinstance(completed, dict) else 0}")'
               else
                 echo "⚠️ upload_state.json not found - will not be able to organize files"
               fi
@@ -139,11 +139,26 @@ jobs:
           print("📡 Connecting to Google Photos...")
           client = Client(auth_data=auth_data)
           
-          # Update cache
-          print("🔄 Downloading library metadata...")
+          # Update cache with force refresh
+          print("🔄 Downloading library metadata (this may take several minutes)...")
           client.update_cache(show_progress=True)
           
           print("✅ Cache updated successfully")
+          
+          # Verify cache contents
+          import sqlite3
+          from pathlib import Path
+          
+          cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+          if cache_path.exists():
+              conn = sqlite3.connect(cache_path)
+              cursor = conn.cursor()
+              cursor.execute("SELECT COUNT(*) FROM remote_media")
+              count = cursor.fetchone()[0]
+              print(f"📊 Cache now contains {count} media items")
+              conn.close()
+          else:
+              print("⚠️ Cache file not found after update")
           EOF
           
           python3 update_cache.py
@@ -153,6 +168,9 @@ jobs:
           if [ -f "$CACHE_PATH" ]; then
             CACHE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)
             echo "✅ Cache created at $CACHE_PATH (size: $CACHE_SIZE)"
+            
+            # Show cache statistics
+            python3 -c "import sqlite3; conn = sqlite3.connect('$CACHE_PATH'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM remote_media'); count = cursor.fetchone()[0]; print(f'📊 Total items in cache: {count}'); conn.close()" || echo "⚠️ Could not read cache statistics"
           else
             echo "⚠️ Cache file not found at expected location"
           fi
