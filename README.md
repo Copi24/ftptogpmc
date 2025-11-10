@@ -277,7 +277,7 @@ Blockbuster Movies/
 ```
 
 Result in Google Photos:
-- Album: "Blockbuster Movies/Avatar (2009)"
+- Album: "Avatar (2009)"
   - Contains: Avatar.3D.2009.mkv, Avatar.2009.3D.BluRay.mkv
 
 📖 **Full documentation**: See [ORGANIZE_GPHOTOS.md](ORGANIZE_GPHOTOS.md) for detailed usage and troubleshooting.
