@@ -151,23 +151,27 @@ jobs:
                   print(f"📊 Existing cache contains {count} items")
               except Exception as e:
                   print(f"⚠️ Could not read existing cache: {e}")
-                  print("   Will rebuild cache from scratch")
-                  cache_exists = False
+          
+          # CRITICAL FIX: Force full cache rebuild by deleting existing cache
+          # update_cache() only does incremental updates if cache exists
+          # We need a FULL rebuild to find all media, not just recent changes
+          if cache_path.exists():
+              print("🗑️ Deleting existing cache to force FULL rebuild...")
+              print("   (update_cache only does incremental updates if cache exists)")
+              cache_path.unlink()
+              print("✅ Cache deleted - will now rebuild from scratch")
           else:
               print("🆕 No existing cache found - will build from scratch")
           
-          # Initialize client - this may initialize the cache automatically
+          # Initialize client
           print("📡 Connecting to Google Photos...")
           client = Client(auth_data=auth_data)
           print("✅ Client connected")
           
-          # Update the cache - this should populate it if empty, or update it if it exists
-          # According to gpmc behavior, update_cache() will:
-          # - Initialize cache if it doesn't exist
-          # - Fetch new items if cache exists but is stale
-          # - Use pagination to handle large libraries
-          print("🔄 Updating cache with library metadata...")
-          print("   This operation will fetch all media from your Google Photos library")
+          # Force FULL cache rebuild by calling update_cache on empty cache
+          # This will trigger _cache_init which fetches ALL media from library
+          print("🔄 Building FULL cache from Google Photos library...")
+          print("   This fetches ALL media (not just recent changes)")
           print("   It may take several minutes for large libraries...")
           
           try:
