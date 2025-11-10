@@ -102,46 +102,8 @@ jobs:
               
               if [ -f "upload_state.json" ]; then
                 echo "✅ Found upload_state.json"
-                # Show detailed stats
-                python3 << 'PYEOF'
-import json
-import sys
-
-try:
-    with open("upload_state.json") as f:
-        data = json.load(f)
-    
-    version = data.get("version", "unknown")
-    completed = data.get("completed", {})
-    
-    print(f"State file version: {version}")
-    
-    if isinstance(completed, dict):
-        total = len(completed)
-        with_keys = sum(1 for info in completed.values() if isinstance(info, dict) and info.get("media_key") is not None)
-        without_keys = total - with_keys
-        
-        print(f"Total completed uploads: {total}")
-        print(f"  - With media keys: {with_keys}")
-        print(f"  - Without media keys (migrated v1.0): {without_keys}")
-        
-        if without_keys > 0:
-            print(f"⚠️  WARNING: {without_keys} files don't have media keys!")
-            print("   These were likely uploaded with an older version.")
-            print("   Organization will rely on cache/API lookup for these files.")
-    else:
-        print(f"Completed uploads: {len(completed)} (old format - no media keys)")
-        print("⚠️  WARNING: State file is in old v1.0 format!")
-        print("   Organization will rely entirely on cache/API lookup.")
-    
-    failed = len(data.get("failed", {}))
-    if failed > 0:
-        print(f"Failed uploads: {failed}")
-        
-except Exception as e:
-    print(f"❌ Error reading state file: {e}")
-    sys.exit(1)
-PYEOF
+                # Show basic stats
+                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); print(f"Version: {data.get(\"version\", \"unknown\")}"); print(f"Completed uploads: {len(completed) if isinstance(completed, dict) else len(completed)}"); print(f"With media keys: {sum(1 for info in completed.values() if isinstance(info, dict) and info.get(\"media_key\") is not None) if isinstance(completed, dict) else 0}")'
               else
                 echo "⚠️ upload_state.json not found - will not be able to organize files"
               fi
@@ -208,15 +170,7 @@ PYEOF
             echo "✅ Cache created at $CACHE_PATH (size: $CACHE_SIZE)"
             
             # Show cache statistics
-            python3 -c "
-import sqlite3
-conn = sqlite3.connect('$CACHE_PATH')
-cursor = conn.cursor()
-cursor.execute('SELECT COUNT(*) FROM remote_media')
-count = cursor.fetchone()[0]
-print(f'📊 Total items in cache: {count}')
-conn.close()
-            " || echo "⚠️ Could not read cache statistics"
+            python3 -c "import sqlite3; conn = sqlite3.connect('$CACHE_PATH'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM remote_media'); count = cursor.fetchone()[0]; print(f'📊 Total items in cache: {count}'); conn.close()" || echo "⚠️ Could not read cache statistics"
           else
             echo "⚠️ Cache file not found at expected location"
           fi
