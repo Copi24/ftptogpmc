@@ -137,7 +137,16 @@ jobs:
               print("❌ GP_AUTH_DATA not set")
               sys.exit(1)
           
-          cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+          # Initialize client first to get the correct cache path
+          # gpmc stores cache at ~/.gpmc/{email}/storage.db
+          print("📡 Connecting to Google Photos...")
+          client = Client(auth_data=auth_data)
+          print("✅ Client connected")
+          
+          # Get the actual cache path from the client
+          cache_path = client.db_path
+          print(f"📍 Cache location: {cache_path}")
+          
           cache_exists = cache_path.exists()
           
           if cache_exists:
@@ -162,11 +171,6 @@ jobs:
               print("✅ Cache deleted - will now rebuild from scratch")
           else:
               print("🆕 No existing cache found - will build from scratch")
-          
-          # Initialize client
-          print("📡 Connecting to Google Photos...")
-          client = Client(auth_data=auth_data)
-          print("✅ Client connected")
           
           # Force FULL cache rebuild by calling update_cache on empty cache
           # This will trigger _cache_init which fetches ALL media from library
@@ -211,12 +215,33 @@ jobs:
               print("❌ Cache file not found after update!")
               print(f"   Expected location: {cache_path}")
               sys.exit(1)
+          
+          # Output the cache path for the workflow to use
+          print(f"CACHE_PATH={cache_path}")
           EOF
           
-          python3 build_cache.py
+          # Run the cache builder and capture the output
+          CACHE_OUTPUT=$(python3 build_cache.py)
+          CACHE_EXIT=$?
           
-          # Verify cache was created
-          CACHE_PATH="$HOME/.cache/gpmc/library.db"
+          # Print the output
+          echo "$CACHE_OUTPUT"
+          
+          # Check if the script succeeded
+          if [ $CACHE_EXIT -ne 0 ]; then
+            echo "❌ Cache build failed"
+            exit 1
+          fi
+          
+          # Extract the cache path from the output
+          CACHE_PATH=$(echo "$CACHE_OUTPUT" | grep "^CACHE_PATH=" | cut -d'=' -f2-)
+          
+          if [ -z "$CACHE_PATH" ]; then
+            echo "❌ Could not determine cache path from build_cache.py output"
+            exit 1
+          fi
+          
+          # Verify cache was created at the correct location
           if [ -f "$CACHE_PATH" ]; then
             CACHE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)
             echo "✅ Cache available at $CACHE_PATH (size: $CACHE_SIZE)"
