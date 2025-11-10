@@ -290,70 +290,69 @@ class PhotoOrganizer:
             
             # Do a more exhaustive search in the cache database
             # Try multiple search strategies to find files with similar names
+            # Use context manager to ensure connection is always closed
             conn = sqlite3.connect(self.gpmc_cache_path)
-            cursor = conn.cursor()
-            
-            # Strategy 1: Exact match (case-sensitive)
-            cursor.execute(
-                "SELECT media_key, file_name FROM remote_media WHERE file_name = ? LIMIT 1",
-                (filename,)
-            )
-            result = cursor.fetchone()
-            if result:
-                logger.info(f"   ✅ Found exact match: {filename} -> {result[0]}")
-                conn.close()
-                return result[0]
-            
-            # Strategy 2: Case-insensitive match
-            cursor.execute(
-                "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) = LOWER(?) LIMIT 1",
-                (filename,)
-            )
-            result = cursor.fetchone()
-            if result:
-                logger.info(f"   ✅ Found case-insensitive match: {result[1]} -> {result[0]}")
-                conn.close()
-                return result[0]
-            
-            # Strategy 3: LIKE pattern for files ending with this filename (handles path variations)
-            cursor.execute(
-                "SELECT media_key, file_name FROM remote_media WHERE file_name LIKE ? LIMIT 1",
-                (f"%{filename}",)
-            )
-            result = cursor.fetchone()
-            if result:
-                logger.info(f"   ✅ Found pattern match: {result[1]} -> {result[0]}")
-                conn.close()
-                return result[0]
-            
-            # Strategy 4: Case-insensitive LIKE for maximum coverage
-            cursor.execute(
-                "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) LIMIT 1",
-                (f"%{filename}",)
-            )
-            result = cursor.fetchone()
-            if result:
-                logger.info(f"   ✅ Found case-insensitive pattern match: {result[1]} -> {result[0]}")
-                conn.close()
-                return result[0]
-            
-            # Strategy 5: Try basename matching (in case stored with different path)
-            # Extract just the base filename without path
-            base_filename = filename.split('/')[-1]
-            if base_filename != filename:
+            try:
+                cursor = conn.cursor()
+                
+                # Strategy 1: Exact match (case-sensitive)
                 cursor.execute(
-                    "SELECT media_key, file_name FROM remote_media WHERE file_name LIKE ? OR LOWER(file_name) LIKE LOWER(?) LIMIT 1",
-                    (f"%/{base_filename}", f"%/{base_filename}")
+                    "SELECT media_key, file_name FROM remote_media WHERE file_name = ? LIMIT 1",
+                    (filename,)
                 )
                 result = cursor.fetchone()
                 if result:
-                    logger.info(f"   ✅ Found basename match: {result[1]} -> {result[0]}")
-                    conn.close()
+                    logger.info(f"   ✅ Found exact match: {filename} -> {result[0]}")
                     return result[0]
-            
-            logger.debug(f"   File not found in cache after exhaustive search: {filename}")
-            conn.close()
-            return None
+                
+                # Strategy 2: Case-insensitive match
+                cursor.execute(
+                    "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) = LOWER(?) LIMIT 1",
+                    (filename,)
+                )
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"   ✅ Found case-insensitive match: {result[1]} -> {result[0]}")
+                    return result[0]
+                
+                # Strategy 3: LIKE pattern for files ending with this filename (handles path variations)
+                cursor.execute(
+                    "SELECT media_key, file_name FROM remote_media WHERE file_name LIKE ? LIMIT 1",
+                    (f"%{filename}",)
+                )
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"   ✅ Found pattern match: {result[1]} -> {result[0]}")
+                    return result[0]
+                
+                # Strategy 4: Case-insensitive LIKE for maximum coverage
+                cursor.execute(
+                    "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) LIMIT 1",
+                    (f"%{filename}",)
+                )
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"   ✅ Found case-insensitive pattern match: {result[1]} -> {result[0]}")
+                    return result[0]
+                
+                # Strategy 5: Try basename matching (in case stored with different path)
+                # Extract just the base filename without path
+                base_filename = filename.split('/')[-1]
+                if base_filename != filename:
+                    # Use single case-insensitive LIKE query for efficiency
+                    cursor.execute(
+                        "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) LIMIT 1",
+                        (f"%/{base_filename}",)
+                    )
+                    result = cursor.fetchone()
+                    if result:
+                        logger.info(f"   ✅ Found basename match: {result[1]} -> {result[0]}")
+                        return result[0]
+                
+                logger.debug(f"   File not found in cache after exhaustive search: {filename}")
+                return None
+            finally:
+                conn.close()
                 
         except Exception as e:
             logger.debug(f"  Failed to search cache database for {filename}: {e}")
@@ -534,7 +533,7 @@ class PhotoOrganizer:
         lookup_stats = {
             'from_state': 0,
             'from_cache': 0,
-            'from_api': 0,
+            'from_exhaustive_search': 0,
             'not_found': 0
         }
         
@@ -579,7 +578,7 @@ class PhotoOrganizer:
                         media_key = self.search_media_key_via_api(filename)
                         if media_key:
                             found_in_gpmc_count += 1
-                            lookup_method = 'from_api'  # Keep stat name for backward compatibility
+                            lookup_method = 'from_exhaustive_search'
                             # Cache it for future lookups
                             self.media_cache[filename] = media_key
                         else:
