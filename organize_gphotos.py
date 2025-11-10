@@ -756,7 +756,7 @@ class PhotoOrganizer:
         logger.info(f"Total files processed: {sum(lookup_stats.values())}")
         logger.info(f"  - Found in upload state: {lookup_stats['from_state']}")
         logger.info(f"  - Found via gpmc cache: {lookup_stats['from_cache']}")
-        logger.info(f"  - Found via exhaustive cache search: {lookup_stats['from_api']}")
+        logger.info(f"  - Found via exhaustive cache search: {lookup_stats['from_exhaustive_search']}")
         logger.info(f"  - Not found anywhere: {lookup_stats['not_found']}")
         
         if lookup_stats['not_found'] > 0:
