@@ -592,13 +592,14 @@ class PhotoOrganizer:
                                 logger.warning(f"      📋 DIAGNOSIS: No cache sources available")
                                 logger.warning(f"         - upload_state.json: Not found")
                                 logger.warning(f"         - gpmc cache: Not found")
-                                logger.warning(f"      🔧 ACTION: Run 'gpmc update-cache' to build cache OR upload files first")
+                                logger.warning(f"      🔧 ACTION: The workflow should have built the cache - check logs")
                             elif not has_upload_state and has_gpmc_cache:
                                 logger.warning(f"      📋 DIAGNOSIS: File not in gpmc cache (upload_state.json not available)")
-                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to refresh cache")
+                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet")
+                                logger.warning(f"      💡 NOTE: The cache should be rebuilt on each workflow run for full library sync")
                             elif has_upload_state and not has_gpmc_cache:
                                 logger.warning(f"      📋 DIAGNOSIS: File not in upload_state.json (gpmc cache not available)")
-                                logger.warning(f"      🔧 ACTION: File may not be uploaded yet OR run 'gpmc update-cache' to build fallback cache")
+                                logger.warning(f"      🔧 ACTION: The workflow should have built the cache - check logs")
                             else:
                                 logger.warning(f"      📋 DIAGNOSIS: File not found in any source (state, cache, API)")
                                 logger.warning(f"         - upload_state.json: No entry for {filename}")
@@ -607,7 +608,9 @@ class PhotoOrganizer:
                                 logger.warning(f"      🔧 POSSIBLE CAUSES:")
                                 logger.warning(f"         1. File has not been uploaded to Google Photos yet")
                                 logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
-                                logger.warning(f"         3. File was uploaded but hasn't synced to Google Photos library yet")
+                                logger.warning(f"         3. File was uploaded but Google Photos API hasn't indexed it yet")
+                                logger.warning(f"         4. The cache may have been built before files were uploaded")
+                                logger.warning(f"      💡 TIP: The workflow rebuilds the cache on each run to avoid this issue")
                             
                             not_found_count += 1
                             skipped += 1
@@ -742,10 +745,13 @@ class PhotoOrganizer:
             logger.info("🔧 RECOMMENDED ACTIONS")
             logger.info("=" * 80)
             logger.info("To resolve missing files:")
-            logger.info("  1. Run 'gpmc update-cache' to refresh the Google Photos cache")
-            logger.info("  2. Verify files were successfully uploaded (check upload_state.json)")
-            logger.info("  3. Re-run this organization script to pick up newly found files")
+            logger.info("  1. Verify files were successfully uploaded (check upload_state.json)")
+            logger.info("  2. Re-run this workflow - the cache is rebuilt on each run")
+            logger.info("  3. If still missing, verify files exist in Google Photos web/app")
             logger.info("  4. Check for filename mismatches (special characters, encoding)")
+            logger.info("")
+            logger.info("💡 NOTE: The workflow automatically rebuilds the cache each run")
+            logger.info("   to ensure all uploaded files are found, even old ones.")
             logger.info("=" * 80)
         
         # Log overall lookup statistics
