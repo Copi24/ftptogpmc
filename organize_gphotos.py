@@ -88,8 +88,9 @@ class PhotoOrganizer:
             self.client = Client(auth_data=self.auth_data)
             logger.info("✅ Google Photos client initialized")
             
-            # Set the gpmc cache path (same location gpmc uses)
-            self.gpmc_cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+            # Get the actual gpmc cache path from the client
+            # gpmc stores cache at ~/.gpmc/<email>/storage.db
+            self.gpmc_cache_path = self.client.db_path
             
             # Detailed diagnostics for cache location
             cache_dir = self.gpmc_cache_path.parent

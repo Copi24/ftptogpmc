@@ -137,7 +137,16 @@ jobs:
               print("❌ GP_AUTH_DATA not set")
               sys.exit(1)
           
-          cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+          # Initialize client first to get the correct cache path
+          # gpmc stores cache at ~/.gpmc/<email>/storage.db
+          print("📡 Connecting to Google Photos...")
+          client = Client(auth_data=auth_data)
+          print("✅ Client connected")
+          
+          # Get the actual cache path from the client
+          cache_path = client.db_path
+          print(f"📂 Cache location: {cache_path}")
+          
           cache_exists = cache_path.exists()
           
           if cache_exists:
@@ -155,11 +164,6 @@ jobs:
                   cache_exists = False
           else:
               print("🆕 No existing cache found - will build from scratch")
-          
-          # Initialize client - this may initialize the cache automatically
-          print("📡 Connecting to Google Photos...")
-          client = Client(auth_data=auth_data)
-          print("✅ Client connected")
           
           # Update the cache - this should populate it if empty, or update it if it exists
           # According to gpmc behavior, update_cache() will:
@@ -203,16 +207,28 @@ jobs:
                           print(f"   - {filename}")
               
               conn.close()
+              
+              # Output the cache path so the shell script can use it
+              print(f"CACHE_PATH={cache_path}")
           else:
               print("❌ Cache file not found after update!")
               print(f"   Expected location: {cache_path}")
               sys.exit(1)
           EOF
           
-          python3 build_cache.py
+          # Run the cache build script and capture the cache path
+          CACHE_OUTPUT=$(python3 build_cache.py)
+          echo "$CACHE_OUTPUT"
+          
+          # Extract the cache path from the output
+          CACHE_PATH=$(echo "$CACHE_OUTPUT" | grep "^CACHE_PATH=" | cut -d= -f2-)
+          
+          if [ -z "$CACHE_PATH" ]; then
+            echo "❌ Failed to determine cache path"
+            exit 1
+          fi
           
           # Verify cache was created
-          CACHE_PATH="$HOME/.cache/gpmc/library.db"
           if [ -f "$CACHE_PATH" ]; then
             CACHE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)
             echo "✅ Cache available at $CACHE_PATH (size: $CACHE_SIZE)"
