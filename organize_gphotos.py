@@ -290,9 +290,8 @@ class PhotoOrganizer:
             
             # Do a more exhaustive search in the cache database
             # Try multiple search strategies to find files with similar names
-            # Use context manager to ensure connection is always closed
-            conn = sqlite3.connect(self.gpmc_cache_path)
-            try:
+            # Use context manager to ensure connection is properly closed
+            with sqlite3.connect(self.gpmc_cache_path) as conn:
                 cursor = conn.cursor()
                 
                 # Strategy 1: Exact match (case-sensitive)
@@ -336,13 +335,15 @@ class PhotoOrganizer:
                     return result[0]
                 
                 # Strategy 5: Try basename matching (in case stored with different path)
-                # Extract just the base filename without path
-                base_filename = filename.split('/')[-1]
+                # Extract just the base filename without path (cross-platform)
+                base_filename = os.path.basename(filename)
                 if base_filename != filename:
                     # Use single case-insensitive LIKE query for efficiency
+                    # Note: Google Photos may store paths with forward slashes regardless of OS
+                    # So we check for both forward slash and backslash
                     cursor.execute(
-                        "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) LIMIT 1",
-                        (f"%/{base_filename}",)
+                        "SELECT media_key, file_name FROM remote_media WHERE LOWER(file_name) LIKE LOWER(?) OR LOWER(file_name) LIKE LOWER(?) LIMIT 1",
+                        (f"%/{base_filename}", f"%\\{base_filename}")
                     )
                     result = cursor.fetchone()
                     if result:
@@ -351,8 +352,6 @@ class PhotoOrganizer:
                 
                 logger.debug(f"   File not found in cache after exhaustive search: {filename}")
                 return None
-            finally:
-                conn.close()
                 
         except Exception as e:
             logger.debug(f"  Failed to search cache database for {filename}: {e}")
@@ -604,7 +603,7 @@ class PhotoOrganizer:
                                 logger.warning(f"      📋 DIAGNOSIS: File not found in any source (state, cache, API)")
                                 logger.warning(f"         - upload_state.json: No entry for {filename}")
                                 logger.warning(f"         - gpmc cache: No match after trying all search strategies")
-                                logger.warning(f"         - API refresh: File not found in Google Photos library")
+                                logger.warning(f"         - Exhaustive cache search: File not found in Google Photos library")
                                 logger.warning(f"      🔧 POSSIBLE CAUSES:")
                                 logger.warning(f"         1. File has not been uploaded to Google Photos yet")
                                 logger.warning(f"         2. Filename mismatch (check for special characters, encoding issues)")
