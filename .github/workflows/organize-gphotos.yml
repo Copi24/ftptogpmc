@@ -103,7 +103,7 @@ jobs:
               if [ -f "upload_state.json" ]; then
                 echo "✅ Found upload_state.json"
                 # Show basic stats
-                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); print(f"Version: {data.get(\"version\", \"unknown\")}"); print(f"Completed uploads: {len(completed) if isinstance(completed, dict) else len(completed)}"); print(f"With media keys: {sum(1 for info in completed.values() if isinstance(info, dict) and info.get(\"media_key\") is not None) if isinstance(completed, dict) else 0}")'
+                python3 -c 'import json; data = json.load(open("upload_state.json")); completed = data.get("completed", {}); version = data.get("version", "unknown"); num_completed = len(completed) if isinstance(completed, dict) else len(completed); num_with_keys = sum(1 for info in completed.values() if isinstance(info, dict) and info.get("media_key") is not None) if isinstance(completed, dict) else 0; print(f"Version: {version}"); print(f"Completed uploads: {num_completed}"); print(f"With media keys: {num_with_keys}")'
               else
                 echo "⚠️ upload_state.json not found - will not be able to organize files"
               fi
