@@ -116,17 +116,18 @@ jobs:
             echo "Upload files first using 'FTP to Google Photos Transfer' workflow"
           fi
       
-      - name: Update Google Photos cache
+      - name: Build Google Photos cache
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
         run: |
-          echo "🔄 Updating Google Photos cache to enable file detection..."
-          echo "This may take a few minutes depending on library size"
+          echo "🔄 Building Google Photos cache to enable file detection..."
+          echo "This may take several minutes depending on library size"
           
-          # Create a simple Python script to update the cache
-          cat > update_cache.py << 'EOF'
+          # Create a script to properly build the cache
+          cat > build_cache.py << 'EOF'
           import sys
           import os
+          import sqlite3
           from pathlib import Path
           from gpmc import Client
           
@@ -136,30 +137,49 @@ jobs:
               print("❌ GP_AUTH_DATA not set")
               sys.exit(1)
           
-          # Force a full cache rebuild by deleting the existing cache
-          # This ensures all uploaded files are fetched, not just incremental updates
           cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
-          if cache_path.exists():
-              print(f"🗑️ Removing existing cache to force full library sync...")
-              cache_path.unlink()
-              print("✅ Old cache removed")
+          cache_exists = cache_path.exists()
           
-          # Initialize client
+          if cache_exists:
+              # Check current cache status
+              try:
+                  conn = sqlite3.connect(cache_path)
+                  cursor = conn.cursor()
+                  cursor.execute("SELECT COUNT(*) FROM remote_media")
+                  count = cursor.fetchone()[0]
+                  conn.close()
+                  print(f"📊 Existing cache contains {count} items")
+              except Exception as e:
+                  print(f"⚠️ Could not read existing cache: {e}")
+                  print("   Will rebuild cache from scratch")
+                  cache_exists = False
+          else:
+              print("🆕 No existing cache found - will build from scratch")
+          
+          # Initialize client - this may initialize the cache automatically
           print("📡 Connecting to Google Photos...")
           client = Client(auth_data=auth_data)
+          print("✅ Client connected")
           
-          # Update cache - will perform full initialization since cache was deleted
-          print("🔄 Downloading complete library metadata (this may take several minutes)...")
-          print("    This is a FULL sync to ensure all uploaded files are found")
-          client.update_cache(show_progress=True)
+          # Update the cache - this should populate it if empty, or update it if it exists
+          # According to gpmc behavior, update_cache() will:
+          # - Initialize cache if it doesn't exist
+          # - Fetch new items if cache exists but is stale
+          # - Use pagination to handle large libraries
+          print("🔄 Updating cache with library metadata...")
+          print("   This operation will fetch all media from your Google Photos library")
+          print("   It may take several minutes for large libraries...")
           
-          print("✅ Cache updated successfully")
+          try:
+              client.update_cache(show_progress=True)
+              print("✅ Cache update completed")
+          except Exception as e:
+              print(f"❌ Error updating cache: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
           
           # Verify cache contents
-          import sqlite3
-          from pathlib import Path
-          
-          cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
           if cache_path.exists():
               conn = sqlite3.connect(cache_path)
               cursor = conn.cursor()
@@ -167,31 +187,42 @@ jobs:
               count = cursor.fetchone()[0]
               print(f"📊 Cache now contains {count} media items")
               
-              # Show a few sample filenames to help with debugging
-              cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
-              samples = cursor.fetchall()
-              if samples:
-                  print("📁 Sample filenames in cache:")
-                  for (filename,) in samples:
-                      print(f"   - {filename}")
+              if count == 0:
+                  print("⚠️ WARNING: Cache is empty after update!")
+                  print("   This likely means:")
+                  print("   1. Your Google Photos library is empty, OR")
+                  print("   2. There's an authentication or API issue")
+                  print("   Files cannot be organized if cache is empty")
+              else:
+                  # Show sample filenames to help with debugging
+                  cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
+                  samples = cursor.fetchall()
+                  if samples:
+                      print("📁 Sample filenames in cache:")
+                      for (filename,) in samples:
+                          print(f"   - {filename}")
               
               conn.close()
           else:
-              print("⚠️ Cache file not found after update")
+              print("❌ Cache file not found after update!")
+              print(f"   Expected location: {cache_path}")
+              sys.exit(1)
           EOF
           
-          python3 update_cache.py
+          python3 build_cache.py
           
           # Verify cache was created
           CACHE_PATH="$HOME/.cache/gpmc/library.db"
           if [ -f "$CACHE_PATH" ]; then
             CACHE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)
-            echo "✅ Cache created at $CACHE_PATH (size: $CACHE_SIZE)"
+            echo "✅ Cache available at $CACHE_PATH (size: $CACHE_SIZE)"
             
-            # Show cache statistics
-            python3 -c "import sqlite3; conn = sqlite3.connect('$CACHE_PATH'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM remote_media'); count = cursor.fetchone()[0]; print(f'📊 Total items in cache: {count}'); conn.close()" || echo "⚠️ Could not read cache statistics"
+            # Show final cache statistics
+            python3 -c "import sqlite3; conn = sqlite3.connect('$CACHE_PATH'); cursor = conn.cursor(); cursor.execute('SELECT COUNT(*) FROM remote_media'); count = cursor.fetchone()[0]; print(f'📊 Final cache size: {count} items'); conn.close()" || echo "⚠️ Could not read cache statistics"
           else
-            echo "⚠️ Cache file not found at expected location"
+            echo "❌ Cache file not found at expected location: $CACHE_PATH"
+            echo "   This will cause file organization to fail"
+            exit 1
           fi
       
       - name: Run organization script

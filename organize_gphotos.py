@@ -90,11 +90,26 @@ class PhotoOrganizer:
             
             # Set the gpmc cache path (same location gpmc uses)
             self.gpmc_cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+            
+            # Detailed diagnostics for cache location
+            cache_dir = self.gpmc_cache_path.parent
+            logger.info(f"🔍 Checking for cache at: {self.gpmc_cache_path}")
+            logger.info(f"   Cache directory: {cache_dir}")
+            logger.info(f"   Cache dir exists: {cache_dir.exists()}")
+            
+            if cache_dir.exists():
+                # List files in cache directory
+                cache_files = list(cache_dir.iterdir())
+                logger.info(f"   Files in cache dir: {[f.name for f in cache_files]}")
+            
             if self.gpmc_cache_path.exists():
+                cache_size = self.gpmc_cache_path.stat().st_size
                 logger.info(f"✅ Found gpmc cache database at {self.gpmc_cache_path}")
+                logger.info(f"   Cache size: {cache_size / 1024 / 1024:.2f} MB")
             else:
                 logger.warning(f"⚠️ gpmc cache database not found at {self.gpmc_cache_path}")
-                logger.warning("   Consider running 'gpmc update-cache' to build the cache")
+                logger.warning("   The cache should have been built by the workflow")
+                logger.warning("   Check the 'Update Google Photos cache' step logs")
                 
             return True
         except Exception as e:
@@ -129,6 +144,8 @@ class PhotoOrganizer:
             return True
             
         if not self.gpmc_cache_path or not self.gpmc_cache_path.exists():
+            logger.warning("⚠️ Cannot check schema - cache file doesn't exist")
+            logger.warning(f"   Expected location: {self.gpmc_cache_path}")
             return False
         
         try:
@@ -174,6 +191,12 @@ class PhotoOrganizer:
             
             if count == 0:
                 logger.warning("⚠️ gpmc cache is empty - run 'gpmc update-cache' to populate it")
+            else:
+                # Show sample filenames to help with debugging
+                logger.info("📁 Sample filenames from cache (first 10):")
+                cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
+                for (filename,) in cursor.fetchall():
+                    logger.info(f"   - {filename}")
             
             conn.close()
             self.gpmc_schema_checked = True
