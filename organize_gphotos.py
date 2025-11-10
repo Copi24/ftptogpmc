@@ -18,6 +18,7 @@ import json
 import logging
 import hashlib
 import sqlite3
+import time
 from pathlib import Path
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
@@ -382,6 +383,8 @@ class PhotoOrganizer:
             # If it's a dict mapping path -> info, extract media keys
             cached_count = 0
             skipped_none_count = 0
+            migrated_count = 0
+            recovered_keys = {}  # Track files with None keys that we can potentially recover
             
             if isinstance(completed, dict):
                 for file_path, info in completed.items():
@@ -393,6 +396,15 @@ class PhotoOrganizer:
                         if media_key is None:
                             logger.debug(f"  Skipping {filename} - media_key is None (migrated from old state format)")
                             skipped_none_count += 1
+                            migrated_count += 1
+                            # Try to recover the media key from cache
+                            recovered_key = self.search_media_key_in_gpmc_cache(filename)
+                            if recovered_key:
+                                recovered_keys[file_path] = recovered_key
+                                # Store in our memory cache
+                                self.media_cache[filename] = recovered_key
+                                cached_count += 1
+                                logger.info(f"  ✅ Recovered media key for {filename} from cache")
                             continue
                         
                         # Store with original filename
@@ -409,10 +421,14 @@ class PhotoOrganizer:
                             logger.debug(f"  Cached: {filename} -> {media_key}")
             
             logger.info(f"✅ Loaded {cached_count} media keys from state file")
-            if skipped_none_count > 0:
-                logger.warning(f"⚠️ Skipped {skipped_none_count} entries with None media_key")
-                logger.warning("   These files were likely uploaded before state v2.0")
-                logger.warning("   Will attempt to find them using gpmc cache fallback")
+            if len(recovered_keys) > 0:
+                logger.info(f"✅ Recovered {len(recovered_keys)} media keys from cache for migrated files")
+            if skipped_none_count > len(recovered_keys):
+                remaining_none = skipped_none_count - len(recovered_keys)
+                logger.warning(f"⚠️ Still have {remaining_none} entries with None media_key (couldn't recover)")
+                logger.warning(f"   These files were uploaded before state v2.0 and not found in cache")
+                logger.warning(f"   Will attempt to find them using API fallback during organization")
+                logger.warning(f"   💡 TIP: To fix this permanently, re-upload these files or run cache update")
             
         except Exception as e:
             logger.warning(f"⚠️ Failed to load media cache from state: {e}")
@@ -503,6 +519,8 @@ class PhotoOrganizer:
                     else:
                         # Fallback 2: search via Google Photos API (last resort)
                         logger.info(f"   ⚠️ Not found in local caches, trying API lookup: {filename}")
+                        # Add small delay to avoid API rate limits (100ms between API calls)
+                        time.sleep(0.1)
                         media_key = self.search_media_key_via_api(filename)
                         if media_key:
                             found_in_gpmc_count += 1
