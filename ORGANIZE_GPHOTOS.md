@@ -212,20 +212,20 @@ Blockbuster Movies/
 
 The workflow will create:
 
-- Album: `Blockbuster Movies/Avatar (2009)`
+- Album: `Avatar (2009)`
   - Contains: `Avatar.3D.2009.mkv`, `Avatar.2009.3D.BluRay.mkv`
-- Album: `Blockbuster Movies/Gravity (2013)`
+- Album: `Gravity (2013)`
   - Contains: `Gravity.2013.3D.BluRay.mkv`
 
 ## Album Naming
 
-Albums are named using the full folder path from the FTP structure:
+Albums are named using the leaf folder name (the movie folder) from the FTP structure:
 
-- `Blockbuster Movies/A Monster in Paris (2011)`
-- `Blockbuster Movies/Avatar (2009)`
-- `Blockbuster Movies/Toy Story (1995)`
+- `A Monster in Paris (2011)`
+- `Avatar (2009)`
+- `Toy Story (1995)`
 
-This preserves the complete folder hierarchy in a flat album structure.
+This creates clean album names using just the movie folder name, without the full parent path.
 
 ## Limitations
 
