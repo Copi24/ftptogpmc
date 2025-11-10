@@ -504,16 +504,7 @@ class PhotoOrganizer:
             logger.info(f"📁 Processing album: {album_name}")
             logger.info(f"   Files to add: {len(filenames)}")
             
-            if dry_run:
-                logger.info(f"   [DRY RUN] Would create album: {album_name}")
-                for filename in filenames[:5]:  # Show first 5
-                    logger.info(f"   [DRY RUN]   - {filename}")
-                if len(filenames) > 5:
-                    logger.info(f"   [DRY RUN]   ... and {len(filenames) - 5} more")
-                successful += len(filenames)
-                continue
-            
-            # Collect media keys for files in this album
+            # Collect media keys for files in this album (do this even in dry-run to check availability)
             media_keys = []
             not_found_count = 0
             found_in_cache_count = 0
@@ -650,6 +641,20 @@ class PhotoOrganizer:
                         'status': f'SKIPPED - Below threshold ({min_files_threshold})'
                     })
                     continue
+            
+            # Dry-run mode: show what would be created
+            if dry_run:
+                logger.info(f"   [DRY RUN] Would create album: {album_name}")
+                logger.info(f"   [DRY RUN] Would add {len(media_keys)} files (out of {len(filenames)} total)")
+                if not_found_count > 0:
+                    logger.warning(f"   [DRY RUN] ⚠️ Note: {not_found_count} files missing media keys - won't be added")
+                    logger.warning(f"   [DRY RUN] Missing files:")
+                    for missing_file in missing_files_list[:5]:  # Show first 5 missing
+                        logger.warning(f"   [DRY RUN]   ✗ {missing_file}")
+                    if len(missing_files_list) > 5:
+                        logger.warning(f"   [DRY RUN]   ... and {len(missing_files_list) - 5} more missing")
+                successful += len(media_keys)
+                continue
             
             # Add media to album
             try:
