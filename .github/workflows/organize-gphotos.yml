@@ -127,6 +127,7 @@ jobs:
           cat > update_cache.py << 'EOF'
           import sys
           import os
+          from pathlib import Path
           from gpmc import Client
           
           # Get auth data
@@ -135,12 +136,21 @@ jobs:
               print("❌ GP_AUTH_DATA not set")
               sys.exit(1)
           
+          # Force a full cache rebuild by deleting the existing cache
+          # This ensures all uploaded files are fetched, not just incremental updates
+          cache_path = Path.home() / ".cache" / "gpmc" / "library.db"
+          if cache_path.exists():
+              print(f"🗑️ Removing existing cache to force full library sync...")
+              cache_path.unlink()
+              print("✅ Old cache removed")
+          
           # Initialize client
           print("📡 Connecting to Google Photos...")
           client = Client(auth_data=auth_data)
           
-          # Update cache with force refresh
-          print("🔄 Downloading library metadata (this may take several minutes)...")
+          # Update cache - will perform full initialization since cache was deleted
+          print("🔄 Downloading complete library metadata (this may take several minutes)...")
+          print("    This is a FULL sync to ensure all uploaded files are found")
           client.update_cache(show_progress=True)
           
           print("✅ Cache updated successfully")
@@ -156,6 +166,15 @@ jobs:
               cursor.execute("SELECT COUNT(*) FROM remote_media")
               count = cursor.fetchone()[0]
               print(f"📊 Cache now contains {count} media items")
+              
+              # Show a few sample filenames to help with debugging
+              cursor.execute("SELECT file_name FROM remote_media LIMIT 10")
+              samples = cursor.fetchall()
+              if samples:
+                  print("📁 Sample filenames in cache:")
+                  for (filename,) in samples:
+                      print(f"   - {filename}")
+              
               conn.close()
           else:
               print("⚠️ Cache file not found after update")
