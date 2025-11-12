@@ -11,8 +11,8 @@ This script:
 The script handles the fact that all files were initially uploaded to the main
 Google Photos library without folder structure, and now need to be organized.
 
-Album names are created using the leaf folder name (e.g., "Avatar (2009)")
-rather than the full path (e.g., "Blockbuster Movies/Avatar (2009)").
+Album names use the full path (e.g., "Blockbuster Movies/Avatar (2009)")
+to preserve folder hierarchy in a flat naming scheme, since Google Photos doesn't support nested folders.
 """
 
 import os
@@ -388,8 +388,8 @@ class PhotoOrganizer:
         """
         Recursively build a mapping of files to their album names.
         
-        Album names are extracted from the leaf folder name in the path, not the full path.
-        For example, "Blockbuster Movies/Avatar (2009)" becomes album "Avatar (2009)".
+        Album names use the FULL path to preserve folder hierarchy in a flat structure.
+        For example, "Blockbuster Movies/Avatar (2009)" becomes album "Blockbuster Movies/Avatar (2009)".
         
         Args:
             node: Current directory node from manifest structure
@@ -402,11 +402,11 @@ class PhotoOrganizer:
             # Map ISO to MKV (conversion happened during upload)
             target_filename = self.map_iso_to_mkv(filename)
             
-            # Use the leaf folder name as the album name (e.g., "Avatar (2009)" instead of "Blockbuster Movies/Avatar (2009)")
+            # Use the FULL path as the album name to preserve folder hierarchy
             # Files in root (empty album_path) are skipped - they stay in main library
             if album_path:
-                # Extract leaf folder name from the full path
-                album_name = album_path.split('/')[-1] if '/' in album_path else album_path
+                # Use full path for flat folder hierarchy (Google Photos doesn't support nested folders)
+                album_name = album_path  # Use full path for flat folder hierarchy
                 self.file_to_album_map[target_filename] = album_name
                 logger.debug(f"  {target_filename} -> album: {album_name} (from path: {album_path})")
             else:
