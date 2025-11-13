@@ -147,7 +147,7 @@ class StateManager:
     
     def get_completed_files(self) -> List[str]:
         """Get list of completed files."""
-        return self.state['completed']
+        return list(self.state['completed'].keys())
     
     def get_failed_files(self) -> Dict:
         """Get dictionary of failed files with details."""
