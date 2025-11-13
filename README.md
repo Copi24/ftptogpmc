@@ -199,6 +199,11 @@ Logs include:
 - FTP transfer speed depends on server performance (typically slow for 30GB+ files)
 - Google Photos API requires full file download before upload (true streaming not possible)
 - Workflow timeout: 6 hours max per run (but resumes automatically on next run)
+- **Album handling**: The workflow tracks created albums to avoid duplicates
+  - First file in a folder creates the album
+  - Subsequent files in the same folder reuse the existing album
+  - Album keys are persisted in the state file across workflow runs
+  - This ensures clean organization without duplicate albums
 
 ## License
 
@@ -226,6 +231,10 @@ The script uses a persistent `upload_state.json` file to track progress:
       "last_error": "Connection timeout",
       "last_failed": "2024-01-15T09:00:00"
     }
+  },
+  "albums": {
+    "Movies/Avatar 3D (2009)": "AF1QipMa...",
+    "Blockbuster Movies/Asterix": "AF1QipXy..."
   },
   "stats": {
     "total_uploaded": 5,

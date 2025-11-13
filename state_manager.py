@@ -53,6 +53,7 @@ class StateManager:
             'failed': {},         # Files that failed with attempt count
             'in_progress': None,  # Currently processing file
             'skipped': [],        # Files skipped (too large, etc)
+            'albums': {},         # Track created albums (album_name -> album_key) to avoid duplicates
             'stats': {
                 'total_uploaded': 0,
                 'total_failed': 0,
@@ -156,6 +157,27 @@ class StateManager:
         """Get upload statistics."""
         return self.state['stats']
     
+    def get_album_key(self, album_name: str) -> str:
+        """
+        Get the album key for a given album name.
+        Returns None if album hasn't been created yet.
+        """
+        # Ensure albums dict exists (for backward compatibility)
+        if 'albums' not in self.state:
+            self.state['albums'] = {}
+        return self.state['albums'].get(album_name)
+    
+    def set_album_key(self, album_name: str, album_key: str):
+        """
+        Store the album key for a given album name.
+        This tracks albums we've created to avoid duplicates.
+        """
+        # Ensure albums dict exists (for backward compatibility)
+        if 'albums' not in self.state:
+            self.state['albums'] = {}
+        self.state['albums'][album_name] = album_key
+        self._save_state()
+    
     def print_summary(self):
         """Print a summary of current state."""
         print("=" * 80)
@@ -165,6 +187,10 @@ class StateManager:
         print(f"❌ Failed: {len(self.state['failed'])} files")
         print(f"⏭️  Skipped: {len(self.state['skipped'])} files")
         print(f"📦 Total uploaded: {self.state['stats']['total_bytes'] / (1024**3):.2f}GB")
+        
+        # Show album tracking info
+        if 'albums' in self.state and self.state['albums']:
+            print(f"📂 Albums created: {len(self.state['albums'])}")
         
         if self.state['in_progress']:
             print(f"🔄 In progress: {self.state['in_progress']['path']}")
