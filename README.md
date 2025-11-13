@@ -10,6 +10,10 @@ Automated script to transfer large 3D movie files (~30GB) from FTP servers to Go
 - ⏭️ **Skip Completed**: Automatically skips files already successfully uploaded
 - 💾 **Maximum Disk Space**: Uses ~60GB of available disk space (up from 14GB) via LVM optimization
 - 📁 **Automatic Discovery**: Recursively scans FTP server for large movie files (.mkv, .iso, etc.)
+- 📂 **Folder Organization**: Uploads files directly to albums matching FTP folder structure (e.g., "Blockbuster Movies/Avatar (2009)")
+  - Automatically creates or reuses existing albums (no duplicates)
+  - Preserves folder hierarchy in flat naming scheme (Google Photos doesn't support nested folders)
+  - Smart continuation tracks which files uploaded to which albums
 - 🛡️ **Robust Error Handling**: Retry logic with stall detection and exponential backoff
 - ⏱️ **GitHub Actions**: Runs automatically on schedule or manually via workflow dispatch
 - 🗑️ **Auto Cleanup**: Deletes local files immediately after successful upload to free space
@@ -140,11 +144,16 @@ python3 ftp_to_gphotos.py
 3. **Filtering**: Identifies large movie files matching size and extension criteria
 4. **Smart Skip**: Skips files already successfully uploaded in previous runs
 5. **Resumable Download**: Downloads files using `rclone copy` with resume support
-6. **Upload**: Uploads to Google Photos using `gpmc` library with original quality (unlimited)
-7. **State Update**: Marks file as completed in persistent state file
-8. **Cleanup**: Deletes local file immediately after successful upload
-9. **State Persistence**: Uploads state file as artifact for next workflow run
-10. **Logging**: Detailed logs saved to `ftp_to_gphotos.log` and uploaded as artifact
+6. **Folder Detection**: Extracts folder path from FTP location (e.g., "Blockbuster Movies/Avatar (2009)")
+7. **Upload with Folders**: Uploads to Google Photos using `gpmc` library with original quality (unlimited)
+   - Files are uploaded directly to albums matching their FTP folder structure
+   - Album names use full path (e.g., "Blockbuster Movies/Avatar (2009)")
+   - GPMC automatically creates albums or reuses existing ones (no duplicates)
+   - Files at root level are uploaded without an album
+8. **State Update**: Marks file as completed in persistent state file with album info
+9. **Cleanup**: Deletes local file immediately after successful upload
+10. **State Persistence**: Uploads state file as artifact for next workflow run
+11. **Logging**: Detailed logs saved to `ftp_to_gphotos.log` and uploaded as artifact
 
 ## Logs
 
@@ -201,11 +210,16 @@ The script uses a persistent `upload_state.json` file to track progress:
 
 ```json
 {
-  "version": "1.0",
+  "version": "2.0",
   "last_updated": "2024-01-15T10:30:00",
-  "completed": [
-    "/Movies/Avatar 3D (2009)/Avatar.3D.2009.1080p.mkv"
-  ],
+  "completed": {
+    "/Movies/Avatar 3D (2009)/Avatar.3D.2009.1080p.mkv": {
+      "media_key": "AF1QipNh...",
+      "size": 32212254720,
+      "timestamp": "2024-01-15T10:30:00",
+      "album_name": "Movies/Avatar 3D (2009)"
+    }
+  },
   "failed": {
     "/Movies/LargeFile.mkv": {
       "attempts": 2,
@@ -249,9 +263,25 @@ Need to organize files in Google Photos based on their original FTP structure? U
 
 ## Organize Files in Google Photos
 
-After uploading all movies, organize them into albums matching the FTP folder structure using the **Organize Google Photos Files** workflow.
+**Note**: As of the latest update, files are **automatically uploaded to their correct folders** during the transfer workflow. The organize workflow is now **optional** and only needed if:
+- You want to reorganize files uploaded with older versions (before folder support)
+- You need to fix folder organization for files that were uploaded incorrectly
 
-### Quick Start
+### Automatic Folder Organization (Default)
+
+The main transfer workflow now automatically:
+- Detects the folder path from the FTP structure (e.g., "Blockbuster Movies/Avatar (2009)")
+- Uploads files directly to albums with those names
+- Creates albums or reuses existing ones (no duplicates)
+- Tracks album names in the state file for smart continuation
+
+**No additional steps needed!** Files are organized as they upload.
+
+### Manual Reorganization (Optional)
+
+If you need to reorganize files uploaded with older versions, use the **Organize Google Photos Files** workflow.
+
+#### Quick Start
 
 1. **Prerequisites**: Run the workflows above to upload files and generate the manifest
 2. Go to **Actions** → **Organize Google Photos Files**
@@ -259,7 +289,7 @@ After uploading all movies, organize them into albums matching the FTP folder st
 4. Review the logs to verify the organization plan
 5. Run again with **dry_run: false** to actually organize files
 
-### What It Does
+#### What It Does
 
 - Reads the FTP manifest to understand folder structure
 - Maps ISO files to their MKV equivalents (from upload conversion)
