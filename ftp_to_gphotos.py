@@ -398,16 +398,59 @@ def stream_file_from_ftp(remote: str, remote_path: str, local_path: Path, chunk_
         return False
 
 
-def upload_to_google_photos(file_path: Path, auth_data: str, retries: int = MAX_RETRIES) -> Optional[str]:
+def get_album_name_from_path(remote_path: str) -> Optional[str]:
+    """
+    Extract album name from FTP remote path.
+    
+    Converts FTP path to album name using the full folder path (excluding filename).
+    For example:
+    - "Blockbuster Movies/Avatar (2009)/Avatar.mkv" -> "Blockbuster Movies/Avatar (2009)"
+    - "Avatar (2009)/Avatar.mkv" -> "Avatar (2009)"
+    - "Avatar.mkv" -> None (root level, no album)
+    
+    This preserves the folder hierarchy in a flat naming scheme since Google Photos
+    doesn't support nested folders. The GPMC library will create or reuse albums
+    with these names.
+    
+    Args:
+        remote_path: Full remote path including filename (e.g., "Movies/Avatar/file.mkv")
+    
+    Returns:
+        Album name as folder path, or None if file is in root
+    """
+    # Get directory path (everything except the filename)
+    dir_path = os.path.dirname(remote_path)
+    
+    # If empty or just "/", file is at root - no album
+    if not dir_path or dir_path == "/":
+        return None
+    
+    # Remove leading/trailing slashes and return as album name
+    album_name = dir_path.strip("/")
+    
+    return album_name if album_name else None
+
+
+def upload_to_google_photos(file_path: Path, auth_data: str, album_name: str = None, retries: int = MAX_RETRIES) -> Optional[str]:
     """
     Upload a file to Google Photos using gpmc.
-    Returns the media key if successful, None otherwise.
+    
+    Args:
+        file_path: Path to the file to upload
+        auth_data: Google Photos authentication data
+        album_name: Optional album name to upload to (folder path like "Blockbuster Movies/Avatar (2009)")
+        retries: Maximum number of retry attempts
+    
+    Returns:
+        The media key if successful, None otherwise.
     """
     file_size_gb = file_path.stat().st_size / (1024**3)
     logger.info("=" * 80)
     logger.info(f"🚀 STARTING UPLOAD TO GOOGLE PHOTOS")
     logger.info(f"File: {file_path.name}")
     logger.info(f"Size: {file_size_gb:.2f}GB")
+    if album_name:
+        logger.info(f"Album: {album_name}")
     logger.info(f"Settings: UNLIMITED STORAGE (use_quota=False, saver=False)")
     logger.info("=" * 80)
     
@@ -425,6 +468,7 @@ def upload_to_google_photos(file_path: Path, auth_data: str, retries: int = MAX_
             # Upload with unlimited storage settings
             result = client.upload(
                 target=str(file_path),
+                album_name=album_name,  # ← Upload directly to album/folder
                 show_progress=True,  # This will show progress in console
                 threads=1,
                 force_upload=False,
@@ -692,25 +736,34 @@ def process_file(remote: str, file_info: Dict, auth_data: str, temp_dir: Path, s
     else:
         logger.info(f"File size verified: {actual_size / (1024**3):.2f}GB")
     
+    # Extract album name from FTP path
+    album_name = get_album_name_from_path(remote_path)
+    
     # Upload to Google Photos
     logger.info("=" * 80)
     logger.info(f"📤 Preparing to upload to Google Photos")
     logger.info(f"File verified and ready: {local_path.name}")
+    if album_name:
+        logger.info(f"📁 Target album/folder: {album_name}")
+    else:
+        logger.info(f"📁 Target: Root (no folder)")
     logger.info("=" * 80)
     
-    media_key = upload_to_google_photos(local_path, auth_data)
+    media_key = upload_to_google_photos(local_path, auth_data, album_name=album_name)
     
     if media_key:
         logger.info("=" * 80)
         logger.info(f"✅ ✅ ✅ COMPLETE SUCCESS! ✅ ✅ ✅")
         logger.info(f"📁 File: {file_name}")
+        if album_name:
+            logger.info(f"📂 Album: {album_name}")
         logger.info(f"🔑 Media Key: {media_key}")
         logger.info(f"📸 Status: NOW IN GOOGLE PHOTOS")
         logger.info(f"💾 Quality: ORIGINAL (unlimited)")
         logger.info("=" * 80)
         
         # Mark as completed in state (saves immediately)
-        state.mark_completed(remote_path, file_info['size'], media_key)
+        state.mark_completed(remote_path, file_info['size'], media_key, album_name=album_name)
         logger.info("💾 State saved after successful upload")
         
         # Try to upload state as artifact using gh CLI (for persistence if workflow times out)

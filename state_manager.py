@@ -99,7 +99,7 @@ class StateManager:
         }
         self._save_state()
     
-    def mark_completed(self, file_path: str, size_bytes: int, media_key: str):
+    def mark_completed(self, file_path: str, size_bytes: int, media_key: str, album_name: str = None):
         """Mark file as successfully uploaded."""
         if file_path not in self.state['completed']:
             self.state['stats']['total_uploaded'] += 1
@@ -109,7 +109,8 @@ class StateManager:
         self.state['completed'][file_path] = {
             'media_key': media_key,
             'size': size_bytes,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.utcnow().isoformat(),
+            'album_name': album_name  # Store album name for tracking
         }
         
         # Remove from failed if it was there
