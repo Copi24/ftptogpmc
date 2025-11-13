@@ -8,6 +8,7 @@ import subprocess
 import logging
 from pathlib import Path
 import os
+import sys
 import shutil
 import time
 import threading
@@ -149,7 +150,9 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         last_output_time = time.time()
         last_file_size = 0
         last_size_check_time = time.time()
+        last_heartbeat_time = time.time()
         TIMEOUT_SECONDS = 600  # 10 minutes without progress = stuck
+        HEARTBEAT_INTERVAL = 120  # Log heartbeat every 2 minutes
         last_progress_line = None
         start_time = time.time()
         
@@ -194,6 +197,16 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
                     last_progress_line = line
             except queue.Empty:
                 pass
+            
+            # Heartbeat logging - prove the workflow is alive
+            current_time = time.time()
+            if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
+                elapsed_total = current_time - start_time
+                elapsed_since_output = current_time - last_output_time
+                logger.info(f"💓 Heartbeat: ffmpeg running for {elapsed_total/60:.1f}min, "
+                          f"last output {elapsed_since_output:.0f}s ago")
+                sys.stdout.flush()
+                last_heartbeat_time = current_time
             
             # Check file size growth (every 10 seconds for better feedback)
             if time.time() - last_size_check_time >= 10:
@@ -248,32 +261,64 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         
         # Process has finished (or we detected completion)
         logger.info(f"FFmpeg monitoring loop exited, waiting for process...")
+        sys.stdout.flush()  # Force flush before waiting
         
         # Wait for threads and collect remaining output
-        stdout_thread.join(timeout=5)
-        stderr_thread.join(timeout=5)
+        stdout_thread.join(timeout=10)
+        if stdout_thread.is_alive():
+            logger.warning("⚠️ stdout thread still alive after 10s timeout (will be cleaned up as daemon)")
+        stderr_thread.join(timeout=10)
+        if stderr_thread.is_alive():
+            logger.warning("⚠️ stderr thread still alive after 10s timeout (will be cleaned up as daemon)")
         
         # Collect remaining output
+        logger.info("Collecting remaining ffmpeg output...")
+        sys.stdout.flush()
+        remaining_output = 0
         while True:
             try:
                 source, line = output_queue.get_nowait()
                 if 'out_time_ms=' in line or 'size=' in line or 'progress=' in line:
                     logger.info(f"ffmpeg: {line}")
+                    remaining_output += 1
             except queue.Empty:
                 break
         
+        remaining_errors = 0
         while True:
             try:
                 source, line = error_queue.get_nowait()
                 if line.strip() and ('frame=' in line or 'fps=' in line or 'bitrate=' in line or 'time=' in line):
                     logger.info(f"ffmpeg: {line}")
+                    remaining_errors += 1
                 elif line.strip():
                     logger.debug(f"ffmpeg stderr: {line}")
+                    remaining_errors += 1
             except queue.Empty:
                 break
         
-        # Process has finished - wait for return code
-        process.wait()
+        logger.info(f"Collected {remaining_output + remaining_errors} remaining output lines")
+        sys.stdout.flush()
+        
+        # Process has finished - wait for return code with timeout (CRITICAL!)
+        logger.info("Waiting for ffmpeg process to finish (max 60s)...")
+        sys.stdout.flush()
+        try:
+            process.wait(timeout=60)
+            logger.info(f"FFmpeg process exited normally with code {process.returncode}")
+            sys.stdout.flush()
+        except subprocess.TimeoutExpired:
+            logger.error("❌ FFmpeg process did not exit after 60s - KILLING IT")
+            sys.stdout.flush()
+            process.kill()
+            time.sleep(2)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.error("❌ FFmpeg process still alive after kill - terminating forcefully")
+                sys.stdout.flush()
+                process.terminate()
+                time.sleep(1)
         
         # Log final status
         logger.info(f"FFmpeg process finished with return code: {process.returncode}")
