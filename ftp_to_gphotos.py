@@ -61,7 +61,8 @@ FTP_SERVERS = {
 }
 FTP_USER = "Lomusire"
 FTP_PASS = "NoSymbols"
-CURRENT_SERVER = "Challenger"  # Using Challenger (Blockbuster Movies)
+# Read CURRENT_SERVER from environment variable (set by workflow), default to Challenger
+CURRENT_SERVER = os.environ.get("SELECTED_FTP_SERVER", "Challenger")
 MIN_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB minimum (to avoid tiny files)
 MAX_FILE_SIZE = 50 * 1024 * 1024 * 1024  # 50GB maximum (with maximize-build-space we get ~60GB!)
 # Supported extensions - ISO files will be converted to MKV automatically
@@ -858,6 +859,11 @@ def main():
     """Main function."""
     logger.info("=" * 80)
     logger.info("FTP to Google Photos Transfer Script")
+    logger.info("=" * 80)
+    
+    # Log selected server
+    logger.info(f"Selected FTP Server: {CURRENT_SERVER}")
+    logger.info(f"Server details: {FTP_SERVERS[CURRENT_SERVER]}")
     logger.info("=" * 80)
     
     # Get auth data from environment or fail
