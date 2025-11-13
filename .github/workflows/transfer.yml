@@ -2,6 +2,16 @@ name: FTP to Google Photos Transfer
 
 on:
   workflow_dispatch:
+    inputs:
+      ftp_server:
+        description: 'Select FTP Server'
+        required: true
+        default: 'Challenger'
+        type: choice
+        options:
+          - Challenger
+          - Sputnik
+          - Tamarind
   push:
     branches:
       - master
@@ -221,6 +231,7 @@ jobs:
         env:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SELECTED_FTP_SERVER: ${{ github.event.inputs.ftp_server || 'Challenger' }}
         working-directory: repo
         run: |
           # Run the transfer script

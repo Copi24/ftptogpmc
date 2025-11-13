@@ -118,24 +118,80 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
     """
     Ultra-fast remux (no re-encode) from Blu-ray/DVD format to MKV.
     This just repackages the video stream, very fast!
+    
+    Tries multiple FFmpeg strategies if the first one fails:
+    1. Standard remux: ffmpeg -i input -c copy -map 0 output.mkv
+    2. Video+Audio only: ffmpeg -i input -c copy -map 0:v -map 0:a output.mkv
+    3. Force PTS generation: ffmpeg -fflags +genpts -i input -c copy -map 0:v -map 0:a output.mkv
+    4. Ignore errors: ffmpeg -err_detect ignore_err -i input -c copy -map 0:v -map 0:a output.mkv
     """
     logger.info(f"🎬 Remuxing {input_file.name} to MKV (no re-encode - ultra fast!)...")
     
+    # Define strategies to try in order
+    strategies = [
+        {
+            "name": "Standard remux (all streams)",
+            "args": ['-i', str(input_file), '-c', 'copy', '-map', '0', '-y', str(output_file)]
+        },
+        {
+            "name": "Video+Audio only",
+            "args": ['-i', str(input_file), '-c', 'copy', '-map', '0:v', '-map', '0:a', '-y', str(output_file)]
+        },
+        {
+            "name": "Force PTS generation",
+            "args": ['-fflags', '+genpts', '-i', str(input_file), '-c', 'copy', '-map', '0:v', '-map', '0:a', '-y', str(output_file)]
+        },
+        {
+            "name": "Ignore errors",
+            "args": ['-err_detect', 'ignore_err', '-i', str(input_file), '-c', 'copy', '-map', '0:v', '-map', '0:a', '-y', str(output_file)]
+        }
+    ]
+    
+    for strategy_idx, strategy in enumerate(strategies, 1):
+        logger.info("=" * 80)
+        logger.info(f"🔧 Trying strategy {strategy_idx}/{len(strategies)}: {strategy['name']}")
+        logger.info("=" * 80)
+        
+        # Remove output file if it exists from previous attempt
+        if output_file.exists():
+            try:
+                output_file.unlink()
+                logger.info(f"🗑️ Removed previous output file")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to remove previous output: {e}")
+        
+        success = _try_ffmpeg_remux(input_file, output_file, strategy['name'], strategy['args'])
+        
+        if success:
+            logger.info("=" * 80)
+            logger.info(f"✅ SUCCESS with strategy: {strategy['name']}")
+            logger.info("=" * 80)
+            return True
+        else:
+            logger.warning(f"❌ Strategy {strategy_idx} failed: {strategy['name']}")
+            if strategy_idx < len(strategies):
+                logger.info(f"⏭️ Trying next strategy...")
+    
+    logger.error("=" * 80)
+    logger.error(f"❌ ALL STRATEGIES FAILED - could not remux {input_file.name}")
+    logger.error("=" * 80)
+    return False
+
+
+def _try_ffmpeg_remux(input_file: Path, output_file: Path, strategy_name: str, ffmpeg_args: list) -> bool:
+    """
+    Try a single FFmpeg remux strategy.
+    Returns True if successful, False otherwise.
+    """
     try:
-        # ffmpeg remux command - copy all streams without re-encoding
-        cmd = [
-            'ffmpeg',
-            '-i', str(input_file),
-            '-c', 'copy',  # Copy codecs (no re-encoding!)
-            '-map', '0',  # Map all streams
-            '-y',  # Overwrite output
-            str(output_file)
-        ]
+        # Build full command
+        cmd = ['ffmpeg'] + ffmpeg_args
         
         # Add progress reporting to ffmpeg command
-        cmd.extend(['-progress', 'pipe:1', '-loglevel', 'info'])
+        cmd.extend(['-progress', 'pipe:1', '-loglevel', 'error'])
         
-        logger.info(f"Running: {' '.join(cmd)}")
+        logger.info(f"Running FFmpeg command:")
+        logger.info(f"  {' '.join(cmd)}")
         
         process = subprocess.Popen(
             cmd,
@@ -173,13 +229,16 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         stdout_thread.start()
         stderr_thread.start()
         
+        # Collect stderr for error logging
+        stderr_lines = []
+        
         # Monitor both queues and file size
         while process.poll() is None:
             # Check stdout
             try:
                 source, line = output_queue.get_nowait()
                 if 'out_time_ms=' in line or 'size=' in line or 'bitrate=' in line:
-                    logger.info(f"ffmpeg progress: {line}")
+                    logger.debug(f"ffmpeg progress: {line}")
                     last_output_time = time.time()
                     last_progress_line = line
             except queue.Empty:
@@ -188,8 +247,9 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             # Check stderr
             try:
                 source, line = error_queue.get_nowait()
+                stderr_lines.append(line)
                 if 'Duration:' in line or 'time=' in line or 'frame=' in line or 'bitrate=' in line:
-                    logger.info(f"ffmpeg: {line}")
+                    logger.debug(f"ffmpeg: {line}")
                     last_output_time = time.time()
                     last_progress_line = line
             except queue.Empty:
@@ -258,17 +318,16 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
             try:
                 source, line = output_queue.get_nowait()
                 if 'out_time_ms=' in line or 'size=' in line or 'progress=' in line:
-                    logger.info(f"ffmpeg: {line}")
+                    logger.debug(f"ffmpeg: {line}")
             except queue.Empty:
                 break
         
         while True:
             try:
                 source, line = error_queue.get_nowait()
+                stderr_lines.append(line)
                 if line.strip() and ('frame=' in line or 'fps=' in line or 'bitrate=' in line or 'time=' in line):
-                    logger.info(f"ffmpeg: {line}")
-                elif line.strip():
-                    logger.debug(f"ffmpeg stderr: {line}")
+                    logger.debug(f"ffmpeg: {line}")
             except queue.Empty:
                 break
         
@@ -277,6 +336,26 @@ def remux_to_mkv(input_file: Path, output_file: Path) -> bool:
         
         # Log final status
         logger.info(f"FFmpeg process finished with return code: {process.returncode}")
+        
+        # Interpret exit codes
+        if process.returncode != 0:
+            logger.error(f"❌ FFmpeg failed with exit code {process.returncode}")
+            
+            # Specific error code interpretation
+            if process.returncode == 234:
+                logger.error(f"   Exit code 234: Output I/O error or incompatible codec/stream")
+            elif process.returncode == 1:
+                logger.error(f"   Exit code 1: General error")
+            elif process.returncode == 255 or process.returncode == -1:
+                logger.error(f"   Exit code {process.returncode}: Process killed or crashed")
+            
+            # Log stderr output for debugging
+            if stderr_lines:
+                logger.error(f"FFmpeg stderr output (last 20 lines):")
+                for line in stderr_lines[-20:]:
+                    logger.error(f"  {line}")
+            else:
+                logger.error(f"No stderr output captured")
         
         # Check if output file exists and has size
         if output_file.exists():
