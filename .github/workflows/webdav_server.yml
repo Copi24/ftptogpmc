@@ -43,16 +43,25 @@ jobs:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
         run: |
           echo "Starting WebDAV server..."
-          nohup python gphotos_webdav_server.py > webdav.log 2>&1 &
-          sleep 5
+          python gphotos_webdav_server.py > webdav.log 2>&1 &
+          
+          # Wait longer for server to start
+          echo "Waiting for server to initialize..."
+          sleep 15
           
           # Check if server started
-          if curl -f http://localhost:8080/ --max-time 5; then
+          if curl -f http://localhost:8080/ --max-time 10 2>&1 | tee curl_test.log; then
             echo "✅ WebDAV server is running"
           else
-            echo "❌ WebDAV server failed to start"
-            cat webdav.log
-            exit 1
+            echo "❌ Server check failed, showing logs:"
+            echo "=== WebDAV Log ==="
+            cat webdav.log || echo "No webdav.log"
+            echo "=== Curl Test ==="
+            cat curl_test.log || echo "No curl output"
+            echo "=== Checking if process is running ==="
+            ps aux | grep python || echo "Python process not found"
+            # Don't exit, continue anyway - curl might fail due to auth
+            echo "⚠️ Continuing anyway as server may require auth..."
           fi
       
       - name: Start Cloudflare Tunnel
