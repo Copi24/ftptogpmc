@@ -1,4 +1,4 @@
-git+https://github.com/Copi24/gpmc.git
+gpmc @ https://github.com/xob0t/google_photos_mobile_client/archive/refs/heads/main.zip
 requests>=2.31.0
 wsgidav>=4.3.0
 cheroot>=10.0.0
