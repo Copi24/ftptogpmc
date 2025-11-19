@@ -52,7 +52,7 @@ jobs:
           EOF
           
           # Run the script
-          python update_cache.py
+          python update_cache.py > cache_update.log 2>&1
       
       - name: Setup Cloudflare Tunnel
         run: |
