@@ -26,7 +26,22 @@ jobs:
           GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
         run: |
           echo "Updating Google Photos cache..."
-          python -c "from gpmc import Client; client = Client(auth_data='$GP_AUTH_DATA'); print(f'Cache updated: {client.db_path}')"
+          python -c "
+          from gpmc import Client
+          import os
+          
+          client = Client(auth_data=os.environ['GP_AUTH_DATA'])
+          print(f'Initialized client, cache at: {client.db_path}')
+          
+          # Fetch library state
+          print('Fetching library state...')
+          state = client.api.get_library_state()
+          print(f'Library state fetched: {len(state)} items')
+          
+          # Save to cache
+          client.cache.save_remote_media(state)
+          print('Cache updated successfully!')
+          "
       
       - name: Setup Cloudflare Tunnel
         run: |
