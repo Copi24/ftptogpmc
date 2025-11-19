@@ -286,21 +286,56 @@ class DebugResource(DAVNonCollection):
         def w(s):
             out.write(f"{s}\n".encode('utf-8'))
             
-        w("=== WebDAV Server Debug Info ===")
-        w(f"Cache Path: {self.provider.cache_path}")
-        
-        if not self.provider.cache_path:
-            w("ERROR: Cache path is None")
-            out.seek(0)
-            return out
-            
-        if not self.provider.cache_path.exists():
-            w(f"ERROR: Cache path does not exist: {self.provider.cache_path}")
-            out.seek(0)
-            return out
-            
         try:
-            with sqlite3.connect(self.provider.cache_path) as conn:
+            w("=== WebDAV Server Debug Info ===")
+            
+            # Debug Environment
+            w(f"User: {os.environ.get('USER', 'unknown')}")
+            w(f"Home: {Path.home()}")
+            
+            # Debug Provider
+            if not self.provider:
+                w("ERROR: Provider is None")
+                out.seek(0)
+                return out
+                
+            cache_path = self.provider.cache_path
+            w(f"Configured Cache Path: {cache_path}")
+            w(f"Cache Path Type: {type(cache_path)}")
+            
+            # Check GPMC base dir
+            gpmc_base = Path.home() / ".gpmc"
+            w(f"\nChecking GPMC base dir: {gpmc_base}")
+            if gpmc_base.exists():
+                w("Contents of .gpmc:")
+                for p in gpmc_base.rglob("*"):
+                    w(f"  - {p} ({p.stat().st_size} bytes)")
+            else:
+                w("WARNING: .gpmc dir does not exist!")
+            
+            if not cache_path:
+                w("ERROR: Cache path is None")
+                out.seek(0)
+                return out
+                
+            if not isinstance(cache_path, Path):
+                cache_path = Path(str(cache_path))
+                
+            if not cache_path.exists():
+                w(f"ERROR: Cache path does not exist: {cache_path}")
+                # Try to find any DB file
+                if gpmc_base.exists():
+                    dbs = list(gpmc_base.rglob("*.db"))
+                    if dbs:
+                        w(f"Found other DB files: {dbs}")
+                        # Use the largest DB file as fallback?
+                        largest_db = max(dbs, key=lambda p: p.stat().st_size)
+                        w(f"Trying largest DB: {largest_db}")
+                        cache_path = largest_db
+            
+            w(f"\nUsing Cache Path: {cache_path}")
+            
+            with sqlite3.connect(cache_path) as conn:
                 cursor = conn.cursor()
                 
                 # Tables
@@ -329,13 +364,28 @@ class DebugResource(DAVNonCollection):
                     
                 # Merged Albums
                 w("\n--- Merged Albums Logic ---")
-                albums = self.provider.get_merged_albums()
-                w(f"Total merged albums: {len(albums)}")
-                for name, raw_names in list(albums.items())[:10]:
+                
+                # Re-implement logic here to debug it specifically
+                merged_albums = {}
+                cursor.execute("SELECT file_name FROM remote_media")
+                files = [r[0] for r in cursor.fetchall()]
+                w(f"Total files for albums: {len(files)}")
+                
+                for file_path in files:
+                    parts = file_path.split('/')
+                    if len(parts) > 1:
+                        album_raw = parts[0]
+                        album_clean = album_raw.rstrip('$')
+                        if album_clean not in merged_albums:
+                            merged_albums[album_clean] = set()
+                        merged_albums[album_clean].add(album_raw)
+                        
+                w(f"Total merged albums: {len(merged_albums)}")
+                for name, raw_names in list(merged_albums.items())[:10]:
                     w(f"  {name}: {raw_names}")
                     
         except Exception as e:
-            w(f"ERROR reading DB: {e}")
+            w(f"\nCRITICAL ERROR: {e}")
             import traceback
             w(traceback.format_exc())
             
