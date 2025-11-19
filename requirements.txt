@@ -1,4 +1,4 @@
-gpmc @ git+https://github.com/Copi24/gpmc.git
+git+https://github.com/Copi24/gpmc.git
 requests>=2.31.0
 wsgidav>=4.3.0
 cheroot>=10.0.0
