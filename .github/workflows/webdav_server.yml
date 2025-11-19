@@ -45,23 +45,22 @@ jobs:
           echo "Starting WebDAV server..."
           python gphotos_webdav_server.py > webdav.log 2>&1 &
           
-          # Wait longer for server to start
+          # Wait for server to start
           echo "Waiting for server to initialize..."
           sleep 15
           
-          # Check if server started
-          if curl -f http://localhost:8080/ --max-time 10 2>&1 | tee curl_test.log; then
-            echo "✅ WebDAV server is running"
+          # Check if server started (401 is OK - means server is up but needs auth)
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ > status_code.txt
+          STATUS_CODE=$(cat status_code.txt)
+          echo "Server returned HTTP $STATUS_CODE"
+          
+          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "200" ]; then
+            echo "✅ WebDAV server is running (HTTP $STATUS_CODE)"
           else
-            echo "❌ Server check failed, showing logs:"
+            echo "❌ Unexpected status code: $STATUS_CODE"
             echo "=== WebDAV Log ==="
-            cat webdav.log || echo "No webdav.log"
-            echo "=== Curl Test ==="
-            cat curl_test.log || echo "No curl output"
-            echo "=== Checking if process is running ==="
-            ps aux | grep python || echo "Python process not found"
-            # Don't exit, continue anyway - curl might fail due to auth
-            echo "⚠️ Continuing anyway as server may require auth..."
+            cat webdav.log
+            exit 1
           fi
       
       - name: Start Cloudflare Tunnel
