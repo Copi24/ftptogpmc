@@ -61,21 +61,6 @@ jobs:
           sudo dpkg -i cloudflared-linux-amd64.deb
           
           # Configure tunnel
-          mkdir -p ~/.cloudflared
-          echo "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}" > ~/.cloudflared/tunnel_token
-      
-      - name: Start WebDAV server in background
-        env:
-          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
-        run: |
-          echo "Starting WebDAV server..."
-          python gphotos_webdav_server.py > webdav.log 2>&1 &
-          
-          # Wait for server to start
-          echo "Waiting for server to initialize..."
-          sleep 15
-          
-          # Check if server started (401 is OK - means server is up but needs auth)
           curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ > status_code.txt
           STATUS_CODE=$(cat status_code.txt)
           echo "Server returned HTTP $STATUS_CODE"

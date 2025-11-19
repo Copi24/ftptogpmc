@@ -6,7 +6,7 @@ Exposes Google Photos content as a WebDAV server for VR headsets.
 Features:
 - Merges folders with similar names (e.g. "Movie" and "Movie$")
 - Streams files directly from Google Photos
-- Uses local GPMC cache for directory structure
+- Uses Google Photos API directly for album listing (bypassing local cache issues)
 """
 
 import os
@@ -50,7 +50,7 @@ class GPhotosResource(DAVNonCollection):
         self.file_info = file_info
         self.client = client
         self.name = file_info['name']
-        self.size = file_info['size']
+        self.size = int(file_info.get('size', 0))
         self.media_key = file_info['media_key']
         
     def get_content_length(self):
@@ -75,8 +75,167 @@ class GPhotosResource(DAVNonCollection):
     
     def get_last_modified(self):
         return None
+        
+    def get_etag(self):
+        return None
+
+    def support_etag(self):
+        return False
+
+    def support_ranges(self):
+        return False
     
     def get_content(self):
+        """Stream file from Google Photos"""
+        logger.info(f"Streaming file: {self.name}")
+        try:
+            # Get media item info
+            item = self.client.api.get_media_item(self.media_key)
+            if not item:
+                raise DAVError(HTTP_NOT_FOUND, f"Media item not found: {self.media_key}")
+            
+            # Get download URL
+            # For videos, 'dv' = download video. For images, 'd' = download.
+            # We assume mostly videos based on user request, but 'dv' works for both usually or we can check mimeType
+            download_url = f"{item['baseUrl']}=dv"
+            
+            # Stream the content
+            response = requests.get(download_url, stream=True)
+            response.raise_for_status()
+            
+            # Return as BytesIO for DAV (not ideal for large files but wsgidav handles iterators too)
+            # Better: return the iterator directly if wsgidav supports it, or use a generator
+            # WsgiDAV expects a file-like object.
+            
+            # For now, buffering small chunks might be safer or just return the raw response raw object if it supports read()
+            # But requests.raw needs to be wrapped.
+            
+            # Simple approach: Buffer it (might OOM for 12TB files? No, 12TB is total size). 
+            # Individual files might be large (GBs). Buffering to RAM is bad.
+            # WsgiDAV supports returning an iterator that yields bytes.
+            
+            def generate():
+                for chunk in response.iter_content(chunk_size=8192):
+                    yield chunk
+            
+            return generate()
+            
+        except Exception as e:
+            logger.error(f"Error streaming file: {e}")
+            raise DAVError(HTTP_NOT_FOUND, str(e))
+
+
+class GPhotosCollection(DAVCollection):
+    """Represents a folder (merged album) in Google Photos"""
+    
+    def __init__(self, path, environ, album_name, provider):
+        super().__init__(path, environ)
+        self.album_name = album_name
+        self.provider = provider
+        
+    def get_member_names(self):
+        """List files in this album"""
+        files = self.provider.get_files_in_album(self.album_name)
+        return [f['name'] for f in files]
+    
+    def get_member(self, name):
+        """Get a specific file"""
+        files = self.provider.get_files_in_album(self.album_name)
+        for f in files:
+            if f['name'] == name:
+                file_path = f"{self.path}/{name}"
+                return GPhotosResource(file_path, self.environ, f, self.provider.client)
+        return None
+
+
+class GPhotosProvider(DAVProvider):
+    """WebDAV provider for Google Photos"""
+    
+    def __init__(self):
+        super().__init__()
+        self.client = None
+        self.albums_map = {}
+        self._init_client()
+        
+    def _init_client(self):
+        """Initialize GPMC client and fetch albums"""
+        try:
+            self.client = Client(auth_data=GP_AUTH_DATA)
+            logger.info(f"Initialized client")
+            
+            # Fetch albums from API
+            logger.info("Fetching albums from Google Photos API...")
+            self.albums_map = {}
+            try:
+                # get_albums returns a generator or list of album dicts
+                albums = self.client.api.get_albums()
+                count = 0
+                for album in albums:
+                    count += 1
+                    title = album.get('title', 'Untitled')
+                    
+                    # Merging logic
+                    clean_title = title.rstrip('$')
+                    
+                    if clean_title not in self.albums_map:
+                        self.albums_map[clean_title] = []
+                    self.albums_map[clean_title].append(album)
+                    
+                logger.info(f"Fetched {count} albums from API")
+                logger.info(f"Merged into {len(self.albums_map)} logical albums: {list(self.albums_map.keys())}")
+                
+            except Exception as e:
+                logger.error(f"Failed to fetch albums: {e}", exc_info=True)
+                self.albums_map = {}
+                
+        except Exception as e:
+            logger.error(f"Failed to init GPMC client: {e}")
+            raise
+    
+    def get_merged_albums(self) -> Dict[str, List[str]]:
+        """Get list of merged albums"""
+        return {k: [a.get('title') for a in v] for k, v in self.albums_map.items()}
+    
+    def get_files_in_album(self, merged_album_name: str) -> List[Dict]:
+        """Get all files in a merged album via API"""
+        if merged_album_name not in self.albums_map:
+            return []
+            
+        files = []
+        try:
+            for album in self.albums_map[merged_album_name]:
+                album_id = album.get('id')
+                logger.info(f"Fetching media for album: {album.get('title')} ({album_id})")
+                
+                # Fetch media items for this album
+                # search_media returns generator of media items
+                media_items = self.client.api.search_media(album_id=album_id)
+                
+                for item in media_items:
+                    # Extract necessary info
+                    filename = item.get('filename')
+                    if not filename:
+                        continue
+                        
+                    # Calculate size if possible, else default
+                    meta = item.get('mediaMetadata', {})
+                    w = int(meta.get('width', 0))
+                    h = int(meta.get('height', 0))
+                    # Rough estimate if size not provided (video size usually not in metadata directly as bytes)
+                    # We'll use a dummy size if not present, as WebDAV clients might need it for progress bars but streaming works without exact size
+                    size = 100000000 # 100MB dummy
+                        
+                    files.append({
+                        'name': filename,
+                        'media_key': item.get('id'),
+                        'size': size,
+                        'mimeType': item.get('mimeType')
+                    })
+                            
+        except Exception as e:
+            logger.error(f"Error getting files for album {merged_album_name}: {e}")
+            
+        return files
     
     def get_resource_inst(self, path, environ):
         """Get resource instance for a given path"""
@@ -138,12 +297,7 @@ class LogResource(DAVNonCollection):
 
     def get_last_modified(self):
         return None
-
-    def get_content(self):
-        if os.path.exists(self.file_path):
-            return open(self.file_path, 'rb')
-        return BytesIO(b"Log file not found")
-
+        
     def get_etag(self):
         return None
 
@@ -152,6 +306,11 @@ class LogResource(DAVNonCollection):
 
     def support_ranges(self):
         return False
+
+    def get_content(self):
+        if os.path.exists(self.file_path):
+            return open(self.file_path, 'rb')
+        return BytesIO(b"Log file not found")
 
 class DebugResource(DAVNonCollection):
     """Exposes server debug info as a text file"""
@@ -172,7 +331,7 @@ class DebugResource(DAVNonCollection):
 
     def get_last_modified(self):
         return None
-
+        
     def get_etag(self):
         return None
 
@@ -196,61 +355,8 @@ class DebugResource(DAVNonCollection):
             w(f"Directory listing: {os.listdir('.')}")
             
             if self.provider:
-                w(f"Cache Path: {self.provider.cache_path}")
-                if self.provider.cache_path and self.provider.cache_path.exists():
-                    w("Cache file exists")
-                    w(f"Size: {self.provider.cache_path.stat().st_size}")
-                    
-                    with sqlite3.connect(self.provider.cache_path) as conn:
-                        cursor = conn.cursor()
-                        
-                        # Tables
-                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                        tables = [r[0] for r in cursor.fetchall()]
-                        w(f"Tables: {tables}")
-                        
-                        # Remote Media
-                        if 'remote_media' in tables:
-                            cursor.execute("PRAGMA table_info(remote_media)")
-                            columns = [r[1] for r in cursor.fetchall()]
-                            w(f"remote_media columns: {columns}")
-                            
-                            cursor.execute("SELECT COUNT(*) FROM remote_media")
-                            count = cursor.fetchone()[0]
-                            w(f"remote_media row count: {count}")
-                            
-                            w("\n--- First 10 rows from remote_media ---")
-                            cursor.execute("SELECT * FROM remote_media LIMIT 10")
-                            for row in cursor.fetchall():
-                                w(str(row))
-                        else:
-                            w("ERROR: remote_media table missing!")
-
-                        # Albums
-                        if 'albums' in tables:
-                             w("\n--- First 5 rows from albums ---")
-                             cursor.execute("SELECT * FROM albums LIMIT 5")
-                             for row in cursor.fetchall():
-                                w(str(row))
-                        
-                        # Check Merged Albums Logic
-                        w("\n--- Merged Albums Logic Check ---")
-                        if 'remote_media' in tables:
-                            cursor.execute("SELECT file_name FROM remote_media LIMIT 20")
-                            files = [r[0] for r in cursor.fetchall()]
-                            w(f"Sample file_names: {files}")
-                            
-                            merged_albums = {}
-                            for file_path in files:
-                                parts = file_path.split('/')
-                                if len(parts) > 1:
-                                    album_raw = parts[0]
-                                    w(f"  Found album in path: {album_raw}")
-                                else:
-                                    w(f"  No album in path: {file_path}")
-
-                else:
-                    w("Cache file MISSING")
+                w(f"Albums Map Keys: {list(self.provider.albums_map.keys())}")
+                w(f"Total Albums: {len(self.provider.albums_map)}")
             else:
                 w("Provider is None")
                 
@@ -302,20 +408,20 @@ def main():
     
     app = WsgiDAVApp(config)
     
-    server = wsgi.Server(
-        bind_addr=(WEBDAV_HOST, WEBDAV_PORT),
-        wsgi_app=app,
-    )
+    server_args = {
+        "bind_addr": (WEBDAV_HOST, WEBDAV_PORT),
+        "wsgi_app": app,
+    }
     
+    server = wsgi.Server(**server_args)
     logger.info(f"Starting WebDAV server on {WEBDAV_HOST}:{WEBDAV_PORT}")
     logger.info("Username: user, Password: 12345")
     
     try:
         server.start()
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("Stopping server...")
         server.stop()
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
