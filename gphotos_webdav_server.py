@@ -290,6 +290,15 @@ class LogResource(DAVNonCollection):
             return open(self.file_path, 'rb')
         return BytesIO(b"Log file not found")
 
+    def get_etag(self):
+        return None
+
+    def support_etag(self):
+        return False
+
+    def support_ranges(self):
+        return False
+
 class DebugResource(DAVNonCollection):
     """Exposes server debug info as a text file"""
     def __init__(self, path, environ, provider):
@@ -309,6 +318,15 @@ class DebugResource(DAVNonCollection):
 
     def get_last_modified(self):
         return None
+
+    def get_etag(self):
+        return None
+
+    def support_etag(self):
+        return False
+
+    def support_ranges(self):
+        return False
 
     def get_content(self):
         out = BytesIO()
