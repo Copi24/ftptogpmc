@@ -233,6 +233,9 @@ class GPhotosProvider(DAVProvider):
         if not path or path == '/':
             # Root collection
             return GPhotosRootCollection('/', environ, self)
+
+        if path == '/debug.txt':
+            return DebugResource('/debug.txt', environ, self)
         
         # Split path
         parts = path.strip('/').split('/')
@@ -256,6 +259,88 @@ class GPhotosProvider(DAVProvider):
             return None
         
         return None
+
+class DebugResource(DAVNonCollection):
+    """Exposes server debug info as a text file"""
+    def __init__(self, path, environ, provider):
+        super().__init__(path, environ)
+        self.provider = provider
+        self.name = "debug.txt"
+        self.size = 0 # Calculated on read
+
+    def get_content_length(self):
+        return len(self.get_content().getvalue())
+
+    def get_content_type(self):
+        return "text/plain"
+
+    def get_creation_date(self):
+        return None
+
+    def get_last_modified(self):
+        return None
+
+    def get_content(self):
+        out = BytesIO()
+        
+        def w(s):
+            out.write(f"{s}\n".encode('utf-8'))
+            
+        w("=== WebDAV Server Debug Info ===")
+        w(f"Cache Path: {self.provider.cache_path}")
+        
+        if not self.provider.cache_path:
+            w("ERROR: Cache path is None")
+            out.seek(0)
+            return out
+            
+        if not self.provider.cache_path.exists():
+            w(f"ERROR: Cache path does not exist: {self.provider.cache_path}")
+            out.seek(0)
+            return out
+            
+        try:
+            with sqlite3.connect(self.provider.cache_path) as conn:
+                cursor = conn.cursor()
+                
+                # Tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [r[0] for r in cursor.fetchall()]
+                w(f"Tables: {tables}")
+                
+                if 'remote_media' in tables:
+                    # Schema
+                    cursor.execute("PRAGMA table_info(remote_media)")
+                    columns = [r[1] for r in cursor.fetchall()]
+                    w(f"remote_media columns: {columns}")
+                    
+                    # Count
+                    cursor.execute("SELECT COUNT(*) FROM remote_media")
+                    count = cursor.fetchone()[0]
+                    w(f"remote_media row count: {count}")
+                    
+                    # Sample
+                    w("\n--- First 5 rows ---")
+                    cursor.execute("SELECT * FROM remote_media LIMIT 5")
+                    for row in cursor.fetchall():
+                        w(str(row))
+                else:
+                    w("ERROR: remote_media table missing!")
+                    
+                # Merged Albums
+                w("\n--- Merged Albums Logic ---")
+                albums = self.provider.get_merged_albums()
+                w(f"Total merged albums: {len(albums)}")
+                for name, raw_names in list(albums.items())[:10]:
+                    w(f"  {name}: {raw_names}")
+                    
+        except Exception as e:
+            w(f"ERROR reading DB: {e}")
+            import traceback
+            w(traceback.format_exc())
+            
+        out.seek(0)
+        return out
 
 
 class GPhotosRootCollection(DAVCollection):
