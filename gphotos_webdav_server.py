@@ -148,15 +148,33 @@ class GPhotosProvider(DAVProvider):
     
     def get_merged_albums(self) -> Dict[str, List[str]]:
         """Get list of albums, merging names ending with '$'"""
-        if not self.cache_path or not self.cache_path.exists():
+        logger.info(f"get_merged_albums called, cache_path={self.cache_path}")
+        
+        if not self.cache_path:
+            logger.error("Cache path is None!")
+            return {}
+            
+        if not self.cache_path.exists():
+            logger.error(f"Cache path does not exist: {self.cache_path}")
             return {}
             
         merged_albums = {}
         try:
             with sqlite3.connect(self.cache_path) as conn:
                 cursor = conn.cursor()
+                
+                # Log available tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [row[0] for row in cursor.fetchall()]
+                logger.info(f"Available tables: {tables}")
+                
+                # Try to get data
                 cursor.execute("SELECT file_name FROM remote_media")
                 files = [r[0] for r in cursor.fetchall()]
+                logger.info(f"Found {len(files)} files in remote_media")
+                
+                if len(files) == 0:
+                    logger.warning("No files found in remote_media table!")
                 
                 for file_path in files:
                     parts = file_path.split('/')
@@ -167,9 +185,11 @@ class GPhotosProvider(DAVProvider):
                         if album_clean not in merged_albums:
                             merged_albums[album_clean] = set()
                         merged_albums[album_clean].add(album_raw)
+                
+                logger.info(f"Merged albums: {list(merged_albums.keys())}")
                         
         except Exception as e:
-            logger.error(f"Error reading cache: {e}")
+            logger.error(f"Error reading cache: {e}", exc_info=True)
             
         return {k: list(v) for k, v in merged_albums.items()}
     
