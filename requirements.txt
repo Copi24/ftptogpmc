@@ -1,3 +1,6 @@
-gpmc @ https://github.com/xob0t/google_photos_mobile_client/archive/refs/heads/main.zip
+gpmc @ git+https://github.com/Copi24/gpmc.git
 requests>=2.31.0
-
+wsgidav>=4.3.0
+cheroot>=10.0.0
+pyftpdlib>=1.5.9
+pyinstaller>=6.3.0

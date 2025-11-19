@@ -1,0 +1,85 @@
+name: Google Photos WebDAV Server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  webdav-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Update GPMC cache
+        env:
+          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
+        run: |
+          echo "Updating Google Photos cache..."
+          python -c "from gpmc import Client; client = Client(auth_data='$GP_AUTH_DATA'); print(f'Cache updated: {client.db_path}')"
+      
+      - name: Setup Cloudflare Tunnel
+        run: |
+          # Download cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflare-linux-amd64.deb
+          
+          # Configure tunnel
+          mkdir -p ~/.cloudflared
+          echo "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}" > ~/.cloudflared/tunnel_token
+      
+      - name: Start WebDAV server in background
+        env:
+          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
+        run: |
+          echo "Starting WebDAV server..."
+          nohup python gphotos_webdav_server.py > webdav.log 2>&1 &
+          sleep 5
+          
+          # Check if server started
+          if curl -f http://localhost:8080/ --max-time 5; then
+            echo "✅ WebDAV server is running"
+          else
+            echo "❌ WebDAV server failed to start"
+            cat webdav.log
+            exit 1
+          fi
+      
+      - name: Start Cloudflare Tunnel
+        run: |
+          echo "Starting Cloudflare Tunnel..."
+          cloudflared tunnel --no-autoupdate run --token $(cat ~/.cloudflared/tunnel_token) > tunnel.log 2>&1 &
+          sleep 10
+          
+          echo "=========================================="
+          echo "🎉 WebDAV Server is now accessible!"
+          echo "=========================================="
+          echo ""
+          echo "Check your Cloudflare Tunnel dashboard for the public URL"
+          echo "Or check the public hostname you configured"
+          echo ""
+          echo "Connection details:"
+          echo "  Protocol: WebDAV"
+          echo "  Username: user"
+          echo "  Password: 12345"
+          echo ""
+          echo "For VR headsets (Quest, Pico, etc.):"
+          echo "  1. Open your video player app"
+          echo "  2. Add network storage / WebDAV"
+          echo "  3. Enter the Cloudflare URL"
+          echo "  4. Use credentials above"
+          echo "=========================================="
+          
+          # Keep workflow running
+          echo "Server will run for up to 6 hours or until manually cancelled"
+          tail -f webdav.log tunnel.log
