@@ -48,6 +48,49 @@ jobs:
                   count = cursor.fetchone()[0]
                   print(f'Total items in cache: {count}')
           else:
+              print('ERROR: Cache file not found after update!')
+          EOF
+          
+          # Run the script
+          python update_cache.py > cache_update.log 2>&1
+      
+      - name: Setup Cloudflare Tunnel
+        run: |
+          # Download cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
+          
+          # Configure tunnel
+          mkdir -p ~/.cloudflared
+          echo "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}" > ~/.cloudflared/tunnel_token
+      
+      - name: Start WebDAV server in background
+        env:
+          GP_AUTH_DATA: ${{ secrets.GP_AUTH_DATA }}
+        run: |
+          echo "Starting WebDAV server..."
+          # Restore logging to file to capture errors
+          python gphotos_webdav_server.py > webdav.log 2>&1 &
+          
+          # Wait for server to start
+          echo "Waiting for server to initialize..."
+          sleep 15
+          
+          # Check if server started (401 is OK - means server is up but needs auth)
+          # Use || true to prevent immediate exit on connection refused
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+          echo "Server returned HTTP $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ WebDAV server is running (HTTP $HTTP_CODE)"
+          else
+            echo "❌ Server failed to start (HTTP $HTTP_CODE)"
+            echo "=== WebDAV Log ==="
+            cat webdav.log
+            exit 1
+          fi
+      
+      - name: Start Cloudflare Tunnel
         run: |
           echo "Starting Cloudflare Tunnel..."
           cloudflared tunnel --no-autoupdate run --token $(cat ~/.cloudflared/tunnel_token) > tunnel.log 2>&1 &
