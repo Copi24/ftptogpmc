@@ -40,13 +40,37 @@ jobs:
           client.update_cache(show_progress=True)
           print('Cache update completed.')
           
-          # Verify
+          # Verify and Inspect Schema
           if os.path.exists(client.db_path):
               with sqlite3.connect(client.db_path) as conn:
                   cursor = conn.cursor()
+                  
+                  # List all tables
+                  cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                  tables = cursor.fetchall()
+                  print(f'Tables in DB: {tables}')
+                  
+                  # Check remote_media count
                   cursor.execute("SELECT COUNT(*) FROM remote_media")
                   count = cursor.fetchone()[0]
-                  print(f'Total items in cache: {count}')
+                  print(f'Total items in remote_media: {count}')
+                  
+                  # Inspect albums table if it exists
+                  if ('albums',) in tables or ('albums',) in [t[0] for t in tables]: # handle list of tuples
+                      print("Found 'albums' table! Inspecting schema...")
+                      cursor.execute("PRAGMA table_info(albums)")
+                      print(cursor.fetchall())
+                      cursor.execute("SELECT * FROM albums LIMIT 5")
+                      print(cursor.fetchall())
+                  else:
+                      print("'albums' table NOT found.")
+                      
+                  # Inspect remote_media schema
+                  print("Schema of remote_media:")
+                  cursor.execute("PRAGMA table_info(remote_media)")
+                  print(cursor.fetchall())
+                  cursor.execute("SELECT * FROM remote_media LIMIT 1")
+                  print(cursor.fetchall())
           else:
               print('ERROR: Cache file not found after update!')
           EOF
