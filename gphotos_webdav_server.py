@@ -90,6 +90,24 @@ class GPhotosResource(DAVNonCollection):
         logger.info(f"Streaming file: {self.name}")
         try:
             # Get media item info
+            item = self.client.api.get_media_item(self.media_key)
+            if not item:
+                raise DAVError(HTTP_NOT_FOUND, f"Media item not found: {self.media_key}")
+            
+            # Get download URL
+            # For videos, 'dv' = download video. For images, 'd' = download.
+            download_url = f"{item['baseUrl']}=dv"
+            
+            # Stream the content
+            response = requests.get(download_url, stream=True)
+            response.raise_for_status()
+            
+            # Return raw stream which is file-like and compatible with WsgiDAV
+            return response.raw
+            
+        except Exception as e:
+            logger.error(f"Error streaming file: {e}")
+            raise DAVError(HTTP_NOT_FOUND, str(e))
 
 class GPhotosCollection(DAVCollection):
     """Represents a folder (merged album) in Google Photos"""
