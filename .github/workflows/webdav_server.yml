@@ -48,33 +48,6 @@ jobs:
                   count = cursor.fetchone()[0]
                   print(f'Total items in cache: {count}')
           else:
-              print('ERROR: Cache file not found after update!')
-          EOF
-          
-          # Run the script
-          python update_cache.py > cache_update.log 2>&1
-      
-      - name: Setup Cloudflare Tunnel
-        run: |
-          # Download cloudflared
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
-          
-          # Configure tunnel
-          curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ > status_code.txt
-          STATUS_CODE=$(cat status_code.txt)
-          echo "Server returned HTTP $STATUS_CODE"
-          
-          if [ "$STATUS_CODE" = "401" ] || [ "$STATUS_CODE" = "200" ]; then
-            echo "✅ WebDAV server is running (HTTP $STATUS_CODE)"
-          else
-            echo "❌ Unexpected status code: $STATUS_CODE"
-            echo "=== WebDAV Log ==="
-            cat webdav.log
-            exit 1
-          fi
-      
-      - name: Start Cloudflare Tunnel
         run: |
           echo "Starting Cloudflare Tunnel..."
           cloudflared tunnel --no-autoupdate run --token $(cat ~/.cloudflared/tunnel_token) > tunnel.log 2>&1 &
