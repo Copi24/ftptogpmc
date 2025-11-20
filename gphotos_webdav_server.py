@@ -142,37 +142,16 @@ class GPhotosProvider(DAVProvider):
         self._init_client()
         
     def _init_client(self):
-        """Initialize GPMC client and fetch albums"""
+        """Initialize GPMC client"""
         try:
             self.client = Client(auth_data=GP_AUTH_DATA)
             logger.info(f"Initialized client")
+            logger.info(f"Cache path: {self.client.db_path}")
             
-            # Fetch albums from API
-            logger.info("Fetching albums from Google Photos API...")
+            # Try to fetch albums (if method exists, otherwise skip)
             self.albums_map = {}
-            try:
-                # get_albums returns a generator or list of album dicts
-                albums = self.client.api.get_albums()
-                count = 0
-                for album in albums:
-                    count += 1
-                    title = album.get('title', 'Untitled')
-                    
-                    # Merging logic
-                    clean_title = title.rstrip('$')
-                    
-                    if clean_title not in self.albums_map:
-                        self.albums_map[clean_title] = []
-                    self.albums_map[clean_title].append(album)
-                    
-                logger.info(f"Fetched {count} albums from API")
-                logger.info(f"Merged into {len(self.albums_map)} logical albums: {list(self.albums_map.keys())}")
-                
-            except Exception as e:
-                logger.error(f"Failed to fetch albums: {e}", exc_info=True)
-                logger.info(f"Available API methods: {dir(self.client.api)}")
-                logger.info(f"Available Client methods: {dir(self.client)}")
-                self.albums_map = {}
+            # We know get_albums doesn't exist, so we skip it for now
+            # and rely on "All Photos" fallback
                 
         except Exception as e:
             logger.error(f"Failed to init GPMC client: {e}")
@@ -180,47 +159,27 @@ class GPhotosProvider(DAVProvider):
     
     def get_merged_albums(self) -> Dict[str, List[str]]:
         """Get list of merged albums"""
-        return {k: [a.get('title') for a in v] for k, v in self.albums_map.items()}
+        # Return empty for now, plus "All Photos" which is handled in get_resource_inst
+        return {}
     
-    def get_files_in_album(self, merged_album_name: str) -> List[Dict]:
-        """Get all files in a merged album via API"""
-        if merged_album_name not in self.albums_map:
-            return []
-            
+    def get_all_media(self, limit=100):
+        """Get all media from local cache"""
         files = []
         try:
-            for album in self.albums_map[merged_album_name]:
-                album_id = album.get('id')
-                logger.info(f"Fetching media for album: {album.get('title')} ({album_id})")
+            if not os.path.exists(self.client.db_path):
+                return []
                 
-                # Fetch media items for this album
-                # search_media returns generator of media items
-                media_items = self.client.api.search_media(album_id=album_id)
-                
-                for item in media_items:
-                    # Extract necessary info
-                    filename = item.get('filename')
-                    if not filename:
-                        continue
-                        
-                    # Calculate size if possible, else default
-                    meta = item.get('mediaMetadata', {})
-                    w = int(meta.get('width', 0))
-                    h = int(meta.get('height', 0))
-                    # Rough estimate if size not provided (video size usually not in metadata directly as bytes)
-                    # We'll use a dummy size if not present, as WebDAV clients might need it for progress bars but streaming works without exact size
-                    size = 100000000 # 100MB dummy
-                        
+            with sqlite3.connect(self.client.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT file_name, media_key, size_bytes FROM remote_media LIMIT ?", (limit,))
+                for row in cursor.fetchall():
                     files.append({
-                        'name': filename,
-                        'media_key': item.get('id'),
-                        'size': size,
-                        'mimeType': item.get('mimeType')
+                        'name': row[0],
+                        'media_key': row[1],
+                        'size': row[2] if row[2] else 0
                     })
-                            
         except Exception as e:
-            logger.error(f"Error getting files for album {merged_album_name}: {e}")
-            
+            logger.error(f"Error getting all media: {e}")
         return files
     
     def get_resource_inst(self, path, environ):
@@ -230,7 +189,6 @@ class GPhotosProvider(DAVProvider):
         # Normalize path
         path = path.rstrip('/')
         if not path or path == '/':
-            # Root collection
             return GPhotosRootCollection('/', environ, self)
 
         # Check for special files
@@ -241,28 +199,54 @@ class GPhotosProvider(DAVProvider):
             else:
                 return LogResource(path, environ, name)
         
-        # Split path
-        parts = path.strip('/').split('/')
-        
-        if len(parts) == 1:
-            # Album folder
-            album_name = parts[0]
-            albums = self.get_merged_albums()
-            if album_name in albums:
-                return GPhotosCollection(path, environ, album_name, self)
-            return None
+        # Check for "All Photos" folder
+        if name == 'All Photos':
+            return AllPhotosCollection(path, environ, self)
             
-        elif len(parts) == 2:
-            # File in album
-            album_name = parts[0]
+        # Handle files inside All Photos
+        parts = path.strip('/').split('/')
+        if len(parts) == 2 and parts[0] == 'All Photos':
             file_name = parts[1]
-            files = self.get_files_in_album(album_name)
+            # We need to find this file. For now, we just list all and find it.
+            # Inefficient but works for small limit.
+            files = self.get_all_media(limit=1000) # Increase limit for lookup
             for f in files:
                 if f['name'] == file_name:
                     return GPhotosResource(path, environ, f, self.client)
             return None
         
         return None
+
+class AllPhotosCollection(DAVCollection):
+    """Represents the All Photos folder"""
+    def __init__(self, path, environ, provider):
+        super().__init__(path, environ)
+        self.provider = provider
+        
+    def get_member_names(self):
+        files = self.provider.get_all_media()
+        return [f['name'] for f in files]
+        
+    def get_member(self, name):
+        files = self.provider.get_all_media()
+        for f in files:
+            if f['name'] == name:
+                file_path = f"{self.path}/{name}"
+                return GPhotosResource(file_path, self.environ, f, self.provider.client)
+        return None
+
+class GPhotosRootCollection(DAVCollection):
+    """Root collection"""
+    def __init__(self, path, environ, provider):
+        super().__init__(path, environ)
+        self.provider = provider
+
+    def get_member_names(self):
+        # Always show All Photos and logs
+        return ['All Photos', 'debug.txt', 'webdav.log', 'cache_update.log', 'tunnel.log']
+
+    def get_member(self, name):
+        return self.provider.get_resource_inst(f"/{name}", self.environ)
 
 class LogResource(DAVNonCollection):
     """Exposes a local log file"""
@@ -308,6 +292,42 @@ class DebugResource(DAVNonCollection):
 
     def get_content_length(self):
         return len(self.get_content().getvalue())
+
+    def get_content_type(self):
+        return "text/plain"
+
+    def get_creation_date(self):
+        return None
+
+    def get_last_modified(self):
+        return None
+        
+    def get_etag(self):
+        return None
+
+    def support_etag(self):
+        return False
+
+    def support_ranges(self):
+        return False
+
+    def get_content(self):
+        out = BytesIO()
+        out.write(b"=== WebDAV Server Debug Info ===\n")
+        out.write(f"CWD: {os.getcwd()}\n".encode())
+        out.write(f"Directory listing: {os.listdir('.')}\n".encode())
+        
+        # Dump library state to see if we can find albums
+        try:
+            out.write(b"\n--- Library State Dump ---\n")
+            state = self.provider.client.api.get_library_state()
+            import json
+            # Convert to string safely (handle bytes)
+            out.write(str(state).encode())
+        except Exception as e:
+            out.write(f"\nError dumping library state: {e}\n".encode())
+            
+        return out
 
     def get_content_type(self):
         return "text/plain"
