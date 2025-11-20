@@ -170,6 +170,8 @@ class GPhotosProvider(DAVProvider):
                 
             except Exception as e:
                 logger.error(f"Failed to fetch albums: {e}", exc_info=True)
+                logger.info(f"Available API methods: {dir(self.client.api)}")
+                logger.info(f"Available Client methods: {dir(self.client)}")
                 self.albums_map = {}
                 
         except Exception as e:
