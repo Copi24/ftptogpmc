@@ -90,40 +90,6 @@ class GPhotosResource(DAVNonCollection):
         logger.info(f"Streaming file: {self.name}")
         try:
             # Get media item info
-            item = self.client.api.get_media_item(self.media_key)
-            if not item:
-                raise DAVError(HTTP_NOT_FOUND, f"Media item not found: {self.media_key}")
-            
-            # Get download URL
-            # For videos, 'dv' = download video. For images, 'd' = download.
-            # We assume mostly videos based on user request, but 'dv' works for both usually or we can check mimeType
-            download_url = f"{item['baseUrl']}=dv"
-            
-            # Stream the content
-            response = requests.get(download_url, stream=True)
-            response.raise_for_status()
-            
-            # Return as BytesIO for DAV (not ideal for large files but wsgidav handles iterators too)
-            # Better: return the iterator directly if wsgidav supports it, or use a generator
-            # WsgiDAV expects a file-like object.
-            
-            # For now, buffering small chunks might be safer or just return the raw response raw object if it supports read()
-            # But requests.raw needs to be wrapped.
-            
-            # Simple approach: Buffer it (might OOM for 12TB files? No, 12TB is total size). 
-            # Individual files might be large (GBs). Buffering to RAM is bad.
-            # WsgiDAV supports returning an iterator that yields bytes.
-            
-            def generate():
-                for chunk in response.iter_content(chunk_size=8192):
-                    yield chunk
-            
-            return generate()
-            
-        except Exception as e:
-            logger.error(f"Error streaming file: {e}")
-            raise DAVError(HTTP_NOT_FOUND, str(e))
-
 
 class GPhotosCollection(DAVCollection):
     """Represents a folder (merged album) in Google Photos"""
@@ -424,4 +390,7 @@ def main():
         server.stop()
 
 if __name__ == "__main__":
+    if not GP_AUTH_DATA:
+        print("CRITICAL: GP_AUTH_DATA is missing! Cannot start.")
+        sys.exit(1)
     main()
